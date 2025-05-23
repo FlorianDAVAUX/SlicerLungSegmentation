@@ -1,0 +1,9 @@
+{
+    "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/TestModel/test_model0.zip",
+    "model_name": "model_test",
+    "model_id": "001",
+    "configuration": "3d_fullres",
+    "num_classes":2,
+    "fold": 0
+}
+  
