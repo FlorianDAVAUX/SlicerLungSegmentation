@@ -19,6 +19,9 @@ from qt import QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBo
 ###################################################### Objet pour les signaux permettant de savoir si la segmentation est terminée ou s'il y a une erreur ######################################################
 
 class SegmentationSignals(QObject):
+    """
+    Signaux pour la segmentation
+    """
     finished = Signal(bool)
     error = Signal(str)
     progress = Signal(int)
@@ -26,7 +29,13 @@ class SegmentationSignals(QObject):
 ###################################################### Classe principale du module ######################################################
 
 class LungSegmentation(ScriptedLoadableModule):
+    """
+    Module de segmentation des poumons
+    """
     def __init__(self, parent):
+        """
+        Constructeur du module
+        """
         parent.title = "LungSegmentation"
         parent.categories = ["Segmentation"]
         parent.contributors = ["Florian Davaux (CREATIS)"]
@@ -39,7 +48,13 @@ class LungSegmentation(ScriptedLoadableModule):
 ####################################################### Classe pour l'interface graphique du module ######################################################
 
 class LungSegmentationWidget(ScriptedLoadableModuleWidget):
+    """
+    Widget pour l'interface graphique du module de segmentation des poumons
+    """
     def __init__(self, parent=None):
+        """
+        Constructeur du widget
+        """
         ScriptedLoadableModuleWidget.__init__(self, parent)
 
         self.timer = qt.QTimer()
@@ -57,6 +72,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
 
     def setup(self):
+        """
+        Configuration de l'interface graphique du module
+        """
         self.install_dependencies_if_needed()
         ScriptedLoadableModuleWidget.setup(self)
 
@@ -99,7 +117,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.browseOutputButton.clicked.connect(lambda: self.openDialog("output"))
         self.segmentationButton.clicked.connect(self.onSegmentationButtonClicked)
     
+    
     def install_dependencies_if_needed(self):
+        """
+        Vérifie si les dépendances nécessaires sont installées et propose de les installer si elles manquent.
+        """
         required_packages = {
             "torch": "torch",
             "numpy": "numpy",
@@ -153,7 +175,14 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 "Vous devez installer les dépendances pour utiliser cette extension."
             )
 
+
     def openDialog(self, which):
+        """
+        Ouvre une boîte de dialogue pour sélectionner un fichier ou un dossier.
+
+        Args:
+            which (str): "input" pour sélectionner un fichier d'entrée, "output" pour sélectionner un dossier de sortie.
+        """
         if which == "input":
             optionsBox = qt.QMessageBox(slicer.util.mainWindow())
             optionsBox.setWindowTitle("Choisir une source d'image")
@@ -211,7 +240,15 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             if selected:
                 self.lineEditOutputPath.setText(selected)
 
+
     def validateCheckboxes(self, sender):
+        """
+        Valide les cases à cocher pour s'assurer qu'il n'y a pas de sélection mixte Invivo/Exvivo
+        et que les combinaisons de structures sont valides.
+        
+        Args:
+            sender: La case à cocher qui a été modifiée
+        """
         # Grouper les cases par type
         invivo_checkboxes = {
             "parenchyma": self.checkBoxInvivoParenchyma,
@@ -241,9 +278,19 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                     cb.setChecked(False)
             return
 
+
     def check_combination_and_warn(self, parenchyme_checked: bool, airways_checked: bool, vascular_checked: bool, lobes_checked: bool) -> bool:
         """
-        Vérifie si la combinaison est valide et affiche une alerte si elle ne l'est pas.
+        Vérifie la combinaison des cases à cocher et affiche un avertissement si la combinaison est invalide.
+
+        Args:
+            parenchyme_checked: booléen indiquant si la case Parenchyme est cochée
+            airways_checked: booléen indiquant si la case Airways est cochée
+            vascular_checked: booléen indiquant si la case Vascular Tree est cochée
+            lobes_checked: booléen indiquant si la case Lobes est cochée
+
+        Return:
+            True si la combinaison est valide, False sinon
         """
         total_checked = parenchyme_checked + airways_checked + vascular_checked + lobes_checked
 
@@ -281,13 +328,22 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         return False
 
+
     def loadConfig(self):
+        """
+        Charge la configuration des modèles depuis le fichier JSON.
+        """
         config_path = os.path.join(os.path.dirname(__file__), 'Resources', 'models.json')
         with open(config_path, 'r') as f:
             return json.load(f)
     
-    def onSegmentationButtonClicked(self):
 
+    def onSegmentationButtonClicked(self):
+        """
+        Fonction appelée lors du clic sur le bouton de segmentation.
+        Elle vérifie les cases à cocher, charge la configuration, télécharge le modèle si nécessaire,
+        prépare les chemins d'entrée et de sortie, et lance la segmentation.
+        """
         if not self.check_combination_and_warn(
             self.checkBoxInvivoParenchyma.isChecked(),
             self.checkBoxInvivoAirways.isChecked(),
@@ -374,7 +430,18 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             args=(self.imagesTs_path, output_path, model_id, configuration, fold)
         ).start()
     
+
     def run_segmentation_in_thread(self, input_path, output_path, model_id, configuration, fold):
+        """
+        Exécute la segmentation dans un thread séparé pour éviter de bloquer l'interface utilisateur.
+        
+        Args:
+            input_path (str): Chemin du fichier d'entrée.
+            output_path (str): Chemin du dossier de sortie.
+            model_id (str): ID du modèle à utiliser pour la segmentation.
+            configuration (str): Configuration du modèle.
+            fold (str): Fold à utiliser pour la segmentation.
+        """
         command = [
             "nnUNetv2_predict",
             "-i", input_path,
@@ -395,12 +462,26 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         
     
     def on_segmentation_error(self, error_message):
+        """
+        Fonction appelée en cas d'erreur lors de la segmentation.
+        Elle arrête le timer, met à jour la barre de progression et affiche un message d'erreur.
+        
+        Args:
+            error_message (str): Message d'erreur à afficher.
+        """
         self.timer.stop()
         self.progressBar.setVisible(False)
         slicer.util.errorDisplay(f"❌ Erreur lors de la segmentation :\n{error_message}")
 
 
     def on_segmentation_finished(self, success):
+        """
+        Fonction appelée lorsque la segmentation est terminée.
+        Elle arrête le timer, met à jour la barre de progression et affiche un message de succès.
+        
+        Args:
+            success (bool): Indique si la segmentation a réussi ou non.
+        """
         self.timer.stop()
         self.progressBar.setValue(100)
         self.progressBar.setVisible(False)
@@ -408,9 +489,13 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if success:
             self.load_prediction(self.lineEditOutputPath.text)
             slicer.util.infoDisplay("✅ Segmentation terminée avec succès.")
-    
+
 
     def updateProgressBar(self):
+        """
+        Met à jour la barre de progression toutes les secondes.
+        Si la durée de progression est dépassée, la barre est bloquée à 99% tant que la segmentation n'est pas finie.
+        """
         if self.elapsedSeconds >= self.progressDuration:
             self.progressBar.setValue(99)
             return
@@ -421,6 +506,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
 
     def load_prediction(self, output_path):
+        """
+        Charge la prédiction générée par nnUNet dans Slicer.
+
+        Args:
+            output_path (str): Chemin du dossier de sortie où la prédiction est enregistrée.
+        """
         prediction_file = os.path.join(output_path, "001.nrrd")
         new_path = os.path.join(output_path, "segmentation.nrrd")
         os.rename(prediction_file, new_path)
@@ -435,8 +526,15 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         else:
             print(f"❌ Échec du chargement : {new_path}")
 
+
     def edit_json_for_prediction(self, extracted_model_path, input_image_path):
-        # Trouver le dataset.json
+        """
+        Modifie le fichier dataset.json pour préparer la prédiction.
+
+        Args:
+            extracted_model_path (str): Chemin du dossier contenant le modèle extrait.
+            input_image_path (str): Chemin du fichier d'image d'entrée à utiliser pour la prédiction.
+        """
         json_path = None
         for root, dirs, files in os.walk(extracted_model_path):
             if "dataset.json" in files:
