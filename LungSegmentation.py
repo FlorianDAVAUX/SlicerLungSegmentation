@@ -10,8 +10,20 @@ import urllib
 import sys
 import slicer
 import tempfile
+import threading
+from qt import QTimer
 from slicer.ScriptedLoadableModule import *
-from qt import QTreeView, QFileSystemModel, QPushButton, QFileDialog
+from qt import QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
+
+
+###################################################### Objet pour les signaux permettant de savoir si la segmentation est terminée ou s'il y a une erreur ######################################################
+
+class SegmentationSignals(QObject):
+    finished = Signal(bool)
+    error = Signal(str)
+    progress = Signal(int)
+
+###################################################### Classe principale du module ######################################################
 
 class LungSegmentation(ScriptedLoadableModule):
     def __init__(self, parent):
@@ -24,8 +36,26 @@ class LungSegmentation(ScriptedLoadableModule):
         self.imagesTs_path = None
         self.parent.icon = qt.QIcon(os.path.join(os.path.dirname(__file__), 'Resources', 'Icons', 'LungSegmentation.png'))
 
+####################################################### Classe pour l'interface graphique du module ######################################################
 
 class LungSegmentationWidget(ScriptedLoadableModuleWidget):
+    def __init__(self, parent=None):
+        ScriptedLoadableModuleWidget.__init__(self, parent)
+
+        self.timer = qt.QTimer()
+        self.timer.setInterval(1000)
+        self.timer.timeout.connect(self.updateProgressBar)
+
+        self.progressValue = 0
+        self.progressDuration = 5 * 60  
+        self.elapsedSeconds = 0
+
+
+        self.signals = SegmentationSignals()
+        self.signals.finished.connect(self.on_segmentation_finished)
+        self.signals.error.connect(self.on_segmentation_error)
+
+
     def setup(self):
         self.install_dependencies_if_needed()
         ScriptedLoadableModuleWidget.setup(self)
@@ -43,10 +73,10 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.checkBoxInvivoParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoParenchyma")
         self.checkBoxInvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoAirways")
         self.checkBoxInvivoVascularTree = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoVascularTree")
+        self.checkBoxInvivoLobes = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoLobes")
 
         self.checkBoxExvivoParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxExvivoParenchyma")
         self.checkBoxExvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxExvivoAirways")
-
 
         self.browseInputButton = uiWidget.findChild(qt.QPushButton, "browseInputButton")
         self.lineEditInputPath = uiWidget.findChild(qt.QLineEdit, "inputLineEdit")
@@ -56,8 +86,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         self.segmentationButton = uiWidget.findChild(qt.QPushButton, "pushButtonSegmentation")
 
+        self.progressBar = uiWidget.findChild(qt.QProgressBar, "progressBar")
+        self.progressBar.setVisible(False)
+        self.progressBar.setValue(0)
+
         # Connexions
-        for checkbox in [self.checkBoxInvivoParenchyma, self.checkBoxInvivoAirways, self.checkBoxInvivoVascularTree,
+        for checkbox in [self.checkBoxInvivoParenchyma, self.checkBoxInvivoAirways, self.checkBoxInvivoVascularTree, self.checkBoxInvivoLobes,
                  self.checkBoxExvivoParenchyma, self.checkBoxExvivoAirways]:
             checkbox.toggled.connect(lambda state, cb=checkbox: self.validateCheckboxes(cb))
 
@@ -83,7 +117,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # Vérification de l'importabilité des modules
         for pip_name, import_name in required_packages.items():
             try:
-                __import__(import_name)
+                module = __import__(import_name)
             except ImportError:
                 missing_packages.append(pip_name)
 
@@ -101,6 +135,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if install == qt.QMessageBox.Yes:
             try:
                 python_exec = sys.executable
+                print(sys.executable)
                 for pkg in missing_packages:
                     subprocess.check_call([python_exec, "-m", "pip", "install", pkg])
                 qt.QMessageBox.information(
@@ -119,98 +154,288 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             )
 
     def openDialog(self, which):
-        """
-        Ouvre une boîte de dialogue pour choisir un dossier.
-        :param which: "input" pour le dossier d'entrée, "output" pour le dossier de sortie.
-        """
-        directory = qt.QFileDialog.getExistingDirectory(None, "Choisir un dossier", "")
-        if directory:
-            if which == "input":
-                self.lineEditInputPath.setText(directory)
-            elif which == "output":
-                self.lineEditOutputPath.setText(directory)
+        if which == "input":
+            optionsBox = qt.QMessageBox(slicer.util.mainWindow())
+            optionsBox.setWindowTitle("Choisir une source d'image")
+            optionsBox.setText("Sélectionnez le type d'entrée :")
+            imageButton = optionsBox.addButton("Fichier image (.nrrd, .nii, .mha...)", qt.QMessageBox.ActionRole)
+            dicomButton = optionsBox.addButton("Dossier DICOM", qt.QMessageBox.ActionRole)
+            optionsBox.addButton("Annuler", qt.QMessageBox.RejectRole)
+            optionsBox.exec_()
+
+            selected = None
+            clicked = optionsBox.clickedButton()
+            if clicked == imageButton:
+                selected = qt.QFileDialog.getOpenFileName(
+                    slicer.util.mainWindow(),
+                    "Sélectionner une image",
+                    "",
+                    "Images (*.nrrd *.nii *.nii.gz *.mha)"
+                )
+                if isinstance(selected, tuple):
+                    selected = selected[0]
+
+                if selected:
+                    volumeNode = slicer.util.loadVolume(selected)
+            
+            elif clicked == dicomButton:
+                dicomDir = qt.QFileDialog.getExistingDirectory(
+                    slicer.util.mainWindow(),
+                    "Sélectionner un dossier DICOM",
+                    ""
+                )
+                dcmFiles = [os.path.join(dicomDir, f) for f in os.listdir(dicomDir) if f.lower().endswith(".dcm")]
+
+                if not dcmFiles:
+                    qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Aucun fichier DICOM trouvé.")
+                else:
+                    success, volumeNode = slicer.util.loadVolume(dcmFiles[0], returnNode=True)
+                    
+                    if success:
+                        outputPath = os.path.join(dicomDir, "converted_volume.nrrd")
+                        slicer.util.saveNode(volumeNode, outputPath)
+                        selected = outputPath
+                    else:
+                        qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du volume DICOM.")
+
+            if selected:
+                print(f"📂 Fichier sélectionné : {selected}")
+                self.lineEditInputPath.setText(selected)
+
+        elif which == "output":
+            selected = qt.QFileDialog.getExistingDirectory(
+                slicer.util.mainWindow(),
+                "Sélectionner un dossier de sortie",
+                ""
+            )
+            if selected:
+                self.lineEditOutputPath.setText(selected)
 
     def validateCheckboxes(self, sender):
-        invivoChecked = (
-            self.checkBoxInvivoParenchyma.checked or
-            self.checkBoxInvivoAirways.checked or
-            self.checkBoxInvivoVascularTree.checked
-        )
-        exvivoChecked = (
-            self.checkBoxExvivoParenchyma.checked or
-            self.checkBoxExvivoAirways.checked
-        )
+        # Grouper les cases par type
+        invivo_checkboxes = {
+            "parenchyma": self.checkBoxInvivoParenchyma,
+            "airways": self.checkBoxInvivoAirways,
+            "vascular": self.checkBoxInvivoVascularTree,
+            "lobes": self.checkBoxInvivoLobes
+        }
 
-        # Si les deux groupes sont sélectionnés, avertir
-        if invivoChecked and exvivoChecked:
-            qt.QMessageBox.warning(slicer.util.mainWindow(), "Conflit de sélection",
-                                "Veuillez sélectionner uniquement Invivo ou Exvivo, pas les deux.")
-            # Décocher tout sauf le dernier cliqué
-            for checkbox in [
-                self.checkBoxInvivoParenchyma, self.checkBoxInvivoAirways, self.checkBoxInvivoVascularTree,
-                self.checkBoxExvivoParenchyma, self.checkBoxExvivoAirways
-            ]:
-                if checkbox != sender:
-                    checkbox.setChecked(False)
-    
+        exvivo_checkboxes = {
+            "parenchyma": self.checkBoxExvivoParenchyma,
+            "airways": self.checkBoxExvivoAirways
+        }
+
+        # État des groupes
+        invivo_checked = any(cb.checked for cb in invivo_checkboxes.values())
+        exvivo_checked = any(cb.checked for cb in exvivo_checkboxes.values())
+
+        # 1. Empêcher la sélection mixte Invivo/Exvivo
+        if invivo_checked and exvivo_checked:
+            qt.QMessageBox.warning(
+                slicer.util.mainWindow(), "Conflit de sélection",
+                "Veuillez sélectionner uniquement Invivo **ou** Exvivo, pas les deux."
+            )
+            # Désactiver toutes les cases sauf celle qui vient d'être cochée
+            for cb in list(invivo_checkboxes.values()) + list(exvivo_checkboxes.values()):
+                if cb != sender:
+                    cb.setChecked(False)
+            return
+
+    def check_combination_and_warn(self, parenchyme_checked: bool, airways_checked: bool, vascular_checked: bool, lobes_checked: bool) -> bool:
+        """
+        Vérifie si la combinaison est valide et affiche une alerte si elle ne l'est pas.
+        """
+        total_checked = parenchyme_checked + airways_checked + vascular_checked + lobes_checked
+
+        # Cas valides
+        if total_checked == 1:
+            return True
+        if lobes_checked and (parenchyme_checked or airways_checked or vascular_checked):
+            valid = False
+        elif parenchyme_checked and airways_checked and not vascular_checked and not lobes_checked:
+            valid = True
+        elif parenchyme_checked and airways_checked and vascular_checked and not lobes_checked:
+            valid = True
+        else:
+            valid = False
+
+        if valid:
+            return True
+
+        # Cas invalides → pop-up
+        msgBox = QMessageBox()
+        msgBox.setIcon(QMessageBox.Warning)
+        msgBox.setText("La combinaison sélectionnée n'est pas autorisée.")
+        msgBox.setInformativeText(
+            "Combinaisons autorisées :\n"
+            "• Lobes seuls\n"
+            "• Parenchyme seul\n"
+            "• Airways seul\n"
+            "• Vascular seul\n"
+            "• Parenchyme + Airways\n"
+            "• Parenchyme + Airways + Vascular"
+        )
+        msgBox.setWindowTitle("Combinaison invalide")
+        msgBox.setStandardButtons(QMessageBox.Ok)
+        msgBox.exec_()
+
+        return False
+
     def loadConfig(self):
         config_path = os.path.join(os.path.dirname(__file__), 'Resources', 'models.json')
         with open(config_path, 'r') as f:
             return json.load(f)
     
     def onSegmentationButtonClicked(self):
-        print("\n Lancement de la segmentation")
-        
+
+        if not self.check_combination_and_warn(
+            self.checkBoxInvivoParenchyma.isChecked(),
+            self.checkBoxInvivoAirways.isChecked(),
+            self.checkBoxInvivoVascularTree.isChecked(),
+            self.checkBoxInvivoLobes.isChecked()
+        ):
+            return
+
+        print("\n📣 Lancement de la segmentation...")
+
         config = self.loadConfig()
-        model_url = config["model_url"]
-        model_id = config["model_id"]
-        configuration = config["configuration"]
-        fold = str(config["fold"])
-        model_name = config["model_name"]
 
-        input_path = self.lineEditInputPath.text
+        mode = "Invivo" if self.checkBoxInvivoParenchyma.isChecked() or self.checkBoxInvivoAirways.isChecked() or self.checkBoxInvivoVascularTree.isChecked() or self.checkBoxInvivoLobes.isChecked() else "Exvivo"
+
+        if mode == "Invivo":
+            if self.checkBoxInvivoParenchyma.isChecked() and self.checkBoxInvivoAirways.isChecked() and self.checkBoxInvivoVascularTree.isChecked():
+                selected_key = "All"
+            elif self.checkBoxInvivoParenchyma.isChecked() and self.checkBoxInvivoAirways.isChecked():
+                selected_key = "ParenchymaAirways"
+            elif self.checkBoxInvivoParenchyma.isChecked():
+                selected_key = "Parenchyma"
+            elif self.checkBoxInvivoAirways.isChecked():
+                selected_key = "Airways"
+            elif self.checkBoxInvivoVascularTree.isChecked():
+                selected_key = "Vascular"
+            elif self.checkBoxInvivoLobes.isChecked():
+                selected_key = "Lobes"
+            else:
+                qt.QMessageBox.warning(slicer.util.mainWindow(), "Aucun modèle sélectionné", "Veuillez sélectionner au moins une structure.")
+                return
+        else:  # Exvivo
+            if self.checkBoxExvivoParenchyma.isChecked() and self.checkBoxExvivoAirways.isChecked():
+                selected_key = "ParenchymaAirways"
+            else:
+                qt.QMessageBox.warning(slicer.util.mainWindow(), "Modèle indisponible", "Seule la combinaison Parenchyme + Airways est supportée en Exvivo.")
+                return
+
+        try:
+            model_info = config[mode][selected_key]
+        except KeyError:
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur de configuration", f"Aucune configuration trouvée pour {mode} > {selected_key}")
+            return
+
+        model_url = model_info["model_url"]
+        model_id = model_info["model_id"]
+        configuration = model_info["configuration"]
+        fold = str(model_info["fold"])
+        model_name = model_info["model_name"]
+
+        input_path = self.lineEditInputPath.text 
         output_path = self.lineEditOutputPath.text
-        
-        # On récupère le chemin temporaire de Slicer, si disponible sinon on utilise le tempdir
-        temp_path = slicer.app.temporaryPath if slicer.app.temporaryPath else tempfile.gettempdir()
 
+        temp_path = slicer.app.temporaryPath if slicer.app.temporaryPath else tempfile.gettempdir()
         model_zip_path = os.path.join(temp_path, model_name + ".zip")
         extracted_model_path = os.path.join(temp_path, model_name)
 
-        # Télécharger le modèle si nécessaire
         if not os.path.exists(model_zip_path):
-            print("\n 🔽 Téléchargement du modèle depuis GitHub...")
+            print("\n🔽 Téléchargement du modèle depuis GitHub...")
             urllib.request.urlretrieve(model_url, model_zip_path)
-            print("\n ✅ Modèle téléchargé")
+            print("\n✅ Modèle téléchargé")
 
-        # Extraire le modèle
         if not os.path.exists(extracted_model_path):
             with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extracted_model_path)
-        
+
+        # Ici on part du principe que input_path est un fichier NRRD
+        if not os.path.isfile(input_path) or not input_path.endswith('.nrrd'):
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur fichier", "Veuillez sélectionner un fichier NRRD valide en entrée.")
+            return
 
         self.edit_json_for_prediction(extracted_model_path, input_path)
 
-        this_file_path = os.path.abspath(__file__)
-        resources_dir = os.path.join(os.path.dirname(this_file_path), "Resources", "nnUNet")
-
         os.environ["nnUNet_results"] = os.path.abspath(extracted_model_path)
 
-        # Lancer la prédiction
-        subprocess.run([
+        # Lancement de la prédiction
+        self.progressBar.setVisible(True)
+        self.progressBar.setValue(0)
+        self.progressValue = 0
+        self.elapsedSeconds = 0
+        self.timer.start()
+
+        threading.Thread(
+            target=self.run_segmentation_in_thread,
+            args=(self.imagesTs_path, output_path, model_id, configuration, fold)
+        ).start()
+    
+    def run_segmentation_in_thread(self, input_path, output_path, model_id, configuration, fold):
+        command = [
             "nnUNetv2_predict",
-            "-i", self.imagesTs_path,
+            "-i", input_path,
             "-o", output_path,
             "-d", model_id,
             "-c", configuration,
-            "-f", fold
-        ], check=True)
+            "-f", fold,
+        ]
 
-        qt.QMessageBox.information(slicer.util.mainWindow(), "Terminé", "Segmentation terminée avec succès.")
+        self.progressBar.setValue(0)
+        self.progressBar.setVisible(True)
+
+        try:
+            subprocess.run(command, check=True)
+            self.signals.finished.emit(True)
+        except subprocess.CalledProcessError as e:
+            self.signals.error.emit(str(e))
+        
+    
+    def on_segmentation_error(self, error_message):
+        self.timer.stop()
+        self.progressBar.setVisible(False)
+        slicer.util.errorDisplay(f"❌ Erreur lors de la segmentation :\n{error_message}")
 
 
-    def edit_json_for_prediction(self, extracted_model_path, input_path):
+    def on_segmentation_finished(self, success):
+        self.timer.stop()
+        self.progressBar.setValue(100)
+        self.progressBar.setVisible(False)
 
+        if success:
+            self.load_prediction(self.lineEditOutputPath.text)
+            slicer.util.infoDisplay("✅ Segmentation terminée avec succès.")
+    
+
+    def updateProgressBar(self):
+        if self.elapsedSeconds >= self.progressDuration:
+            self.progressBar.setValue(99)
+            return
+        
+        self.elapsedSeconds += 1
+        progress = int((self.elapsedSeconds / self.progressDuration) * 99)
+        self.progressBar.setValue(progress)
+
+
+    def load_prediction(self, output_path):
+        prediction_file = os.path.join(output_path, "001.nrrd")
+        new_path = os.path.join(output_path, "segmentation.nrrd")
+        os.rename(prediction_file, new_path)
+
+        if not prediction_file:
+            qt.QMessageBox.warning(slicer.util.mainWindow(), "Erreur", "Aucune prédiction trouvée à charger.")
+            return
+        
+        loadedNode = slicer.util.loadLabelVolume(new_path)
+        if loadedNode:
+            print(f"✅ Chargé dans Slicer : {new_path}")
+        else:
+            print(f"❌ Échec du chargement : {new_path}")
+
+    def edit_json_for_prediction(self, extracted_model_path, input_image_path):
         # Trouver le dataset.json
         json_path = None
         for root, dirs, files in os.walk(extracted_model_path):
@@ -219,7 +444,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 break
         if not json_path:
             raise FileNotFoundError("dataset.json non trouvé")
-        print(f"✅ dataset.json trouvé : {json_path}")
 
         # Charger le dataset.json
         with open(json_path, 'r') as f:
@@ -229,36 +453,23 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         dataset.pop("training", None)
         dataset["numTraining"] = 0
 
-        # Lister les fichiers à tester
-        image_filenames = sorted([
-            f for f in os.listdir(input_path)
-            if os.path.isfile(os.path.join(input_path, f)) and f.endswith('.nrrd')
-        ])
-        if not image_filenames:
-            raise ValueError("Aucune image trouvée dans le dossier d'entrée.")
+        # Vérifier que le fichier input_image_path existe et est une image NRRD
+        if not os.path.isfile(input_image_path) or not input_image_path.endswith('.nrrd'):
+            raise ValueError("Le chemin d'entrée n'est pas un fichier .nrrd valide.")
 
         # Créer le dossier imagesTs
         imagesTs_path = os.path.join(os.path.dirname(json_path), "imagesTs")
         os.makedirs(imagesTs_path, exist_ok=True)
 
-        # Ajouter les nouvelles images test
-        new_test_entries = []
-        self.temp_copied_images = []
-
-        for i, filename in enumerate(image_filenames, start=1):
-            new_filename = f"{i:03d}_0000.nrrd"
-            src = os.path.join(input_path, filename)
-            dst = os.path.join(imagesTs_path, new_filename)
-            shutil.copyfile(src, dst)
-            print(f"\n 📂 Copié {filename} → imagesTs/{new_filename}")
-
-            relative_path = f"./imagesTs/{new_filename}"
-            new_test_entries.append([relative_path])
-            self.temp_copied_images.append(dst)
+        # Copier l'image dans imagesTs avec le nom attendu
+        new_filename = "001_0000.nrrd"
+        dst = os.path.join(imagesTs_path, new_filename)
+        shutil.copyfile(input_image_path, dst)
+        print(f"\n 📂 Copié {os.path.basename(input_image_path)} → imagesTs/{new_filename}")
 
         # Ajouter la section test
-        dataset["numTest"] = len(image_filenames)
-        dataset["test"] = new_test_entries
+        dataset["numTest"] = 1
+        dataset["test"] = [[f"./imagesTs/{new_filename}"]]
 
         # Sauvegarder
         with open(json_path, 'w') as f:
@@ -267,21 +478,3 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # Stockage pour prédiction
         self.modified_dataset_json = json_path
         self.imagesTs_path = imagesTs_path
-
-
-    def cleanup_temporary_test_images(self):
-        for path in getattr(self, 'temporary_test_images', []):
-            try:
-                os.remove(path)
-                print(f"🗑️ Fichier supprimé : {path}")
-            except Exception as e:
-                print(f"⚠️ Impossible de supprimer {path} : {e}")
-
-
-    def onCheckBoxesChanged(self):
-        if self.checkBoxParenchyma.checked:
-            print("Segmenter parenchyme")
-        if self.checkBoxAirways.checked:
-            print("Segmenter voies aériennes")
-        if self.checkBoxVascularTree.checked:
-            print("Segmenter arbre vasculaire")
