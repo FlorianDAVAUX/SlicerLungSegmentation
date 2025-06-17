@@ -1,9 +1,62 @@
 {
-    "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/TestModel/test_model0.zip",
-    "model_name": "model_test",
-    "model_id": "001",
-    "configuration": "3d_fullres",
-    "num_classes":2,
-    "fold": 0
+  "Invivo": {
+    "Parenchyma": {
+      "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/ParenchymaInvivo/Parenchyma.zip",
+      "model_name": "ParenchymaInvivo",
+      "model_id": "001",
+      "configuration": "3d_fullres",
+      "num_classes": 1,
+      "fold": 0
+    },
+    "Airways": {
+      "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/AirwaysInvivo/Airways.zip",
+      "model_name": "AirwaysInvivo",
+      "model_id": "001",
+      "configuration": "3d_fullres",
+      "num_classes": 1,
+      "fold": 3
+    },
+    "Vascular": {
+      "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/VascularInvivo/Vascular.zip",
+      "model_name": "VascularInvivo",
+      "model_id": "001",
+      "configuration": "3d_fullres",
+      "num_classes": 1,
+      "fold": 1
+    },
+    "ParenchymaAirways": {
+      "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/ParenchymaAirwaysInvivo/ParenchymaAirways.zip",
+      "model_name": "ParenchymaAirwaysInvivo",
+      "model_id": "001",
+      "configuration": "3d_fullres",
+      "num_classes": 2,
+      "fold": 1
+    },
+    "All": {
+      "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/AllInvivo/All.zip",
+      "model_name": "AllInvivo",
+      "model_id": "001",
+      "configuration": "3d_fullres",
+      "num_classes": 3,
+      "fold": 4
+    },
+    "Lobes":{
+      "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/LobesInvivo/LobesInvivo.zip",
+      "model_name": "LobesInvivo",
+      "model_id": "001",
+      "configuration": "3d_fullres",
+      "num_classes": 6,
+      "fold": 2
+    }
+  },
+  "Exvivo": {
+    "ParenchymaAirways": {
+      "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/AllExvivo/Exvivo.zip",
+      "model_name": "ParenchymaAirwaysExvivo",
+      "model_id": "001",
+      "configuration": "3d_fullres",
+      "num_classes": 2,
+      "fold": 4
+    }
+  }
 }
-  

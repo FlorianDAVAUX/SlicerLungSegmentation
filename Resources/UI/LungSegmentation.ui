@@ -66,7 +66,7 @@
    <item>
     <widget class="ctkCollapsibleButton" name="partsCollapsibleButton" native="true">
      <property name="text" stdset="0">
-      <string>Invivo</string>
+      <string>In vivo</string>
      </property>
      <layout class="QFormLayout" name="formLayoutParts">
       <item row="0" column="0">
@@ -90,13 +90,20 @@
         </property>
        </widget>
       </item>
+      <item row="3" column="0">
+       <widget class="QCheckBox" name="checkBoxInvivoLobes">
+        <property name="text">
+         <string>Lobes</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
    <item>
     <widget class="ctkCollapsibleButton" name="partsCollapsibleButton" native="true">
      <property name="text" stdset="0">
-      <string>Exvivo</string>
+      <string>Ex vivo</string>
      </property>
      <layout class="QFormLayout" name="formLayoutParts">
       <item row="0" column="0">
@@ -114,6 +121,13 @@
        </widget>
       </item>
      </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QProgressBar" name="progressBar">
+     <property name="value">
+      <number>24</number>
+     </property>
     </widget>
    </item>
    <item>
