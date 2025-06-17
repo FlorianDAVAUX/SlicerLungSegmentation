@@ -30,7 +30,7 @@
       <item row="1" column="1">
        <widget class="QPushButton" name="browseInputButton">
         <property name="text">
-         <string>Select Input Subjects Directory</string>
+         <string>Select Input Subject</string>
         </property>
        </widget>
       </item>

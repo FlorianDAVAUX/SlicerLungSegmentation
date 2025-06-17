@@ -65,6 +65,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.progressDuration = 5 * 60  
         self.elapsedSeconds = 0
 
+        self.tempConvertedPath = None  # Pour stocker le chemin du fichier temporaire converti
+
 
         self.signals = SegmentationSignals()
         self.signals.finished.connect(self.on_segmentation_finished)
@@ -184,61 +186,100 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             which (str): "input" pour sélectionner un fichier d'entrée, "output" pour sélectionner un dossier de sortie.
         """
         if which == "input":
-            optionsBox = qt.QMessageBox(slicer.util.mainWindow())
-            optionsBox.setWindowTitle("Choisir une source d'image")
-            optionsBox.setText("Sélectionnez le type d'entrée :")
-            imageButton = optionsBox.addButton("Fichier image (.nrrd, .nii, .mha...)", qt.QMessageBox.ActionRole)
-            dicomButton = optionsBox.addButton("Dossier DICOM", qt.QMessageBox.ActionRole)
-            optionsBox.addButton("Annuler", qt.QMessageBox.RejectRole)
-            optionsBox.exec_()
-
-            selected = None
-            clicked = optionsBox.clickedButton()
-            if clicked == imageButton:
-                selected = qt.QFileDialog.getOpenFileName(
-                    slicer.util.mainWindow(),
-                    "Sélectionner une image",
-                    "",
-                    "Images (*.nrrd *.nii *.nii.gz *.mha)"
-                )
-                if isinstance(selected, tuple):
-                    selected = selected[0]
-
-                if selected:
-                    volumeNode = slicer.util.loadVolume(selected)
-            
-            elif clicked == dicomButton:
-                dicomDir = qt.QFileDialog.getExistingDirectory(
-                    slicer.util.mainWindow(),
-                    "Sélectionner un dossier DICOM",
-                    ""
-                )
-                dcmFiles = [os.path.join(dicomDir, f) for f in os.listdir(dicomDir) if f.lower().endswith(".dcm")]
-
-                if not dcmFiles:
-                    qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Aucun fichier DICOM trouvé.")
-                else:
-                    success, volumeNode = slicer.util.loadVolume(dcmFiles[0], returnNode=True)
-                    
-                    if success:
-                        outputPath = os.path.join(dicomDir, "converted_volume.nrrd")
-                        slicer.util.saveNode(volumeNode, outputPath)
-                        selected = outputPath
-                    else:
-                        qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du volume DICOM.")
-
-            if selected:
-                print(f"📂 Fichier sélectionné : {selected}")
-                self.lineEditInputPath.setText(selected)
-
+            selectedPath = self.selectInputFile()
+            if selectedPath:
+                self.lineEditInputPath.setText(selectedPath)
         elif which == "output":
-            selected = qt.QFileDialog.getExistingDirectory(
+            selectedDir = qt.QFileDialog.getExistingDirectory(
                 slicer.util.mainWindow(),
                 "Sélectionner un dossier de sortie",
                 ""
             )
-            if selected:
-                self.lineEditOutputPath.setText(selected)
+            if selectedDir:
+                self.lineEditOutputPath.setText(selectedDir)
+
+    def selectInputFile(self):
+        """
+        Affiche une boîte de dialogue pour sélectionner un fichier image ou un dossier DICOM.
+        Gère les conversions nécessaires vers le format .nrrd.
+        """
+        optionsBox = qt.QMessageBox(slicer.util.mainWindow())
+        optionsBox.setWindowTitle("Choisir une source d'image")
+        optionsBox.setText("Sélectionnez le type d'entrée :")
+        imageButton = optionsBox.addButton("Fichier image (.nrrd, .nii, .mha...)", qt.QMessageBox.ActionRole)
+        dicomButton = optionsBox.addButton("Dossier DICOM", qt.QMessageBox.ActionRole)
+        optionsBox.addButton("Annuler", qt.QMessageBox.RejectRole)
+        optionsBox.exec_()
+
+        clicked = optionsBox.clickedButton()
+        if clicked == imageButton:
+            return self.handleImageSelection()
+        elif clicked == dicomButton:
+            return self.handleDICOMSelection()
+        return None
+
+    def handleImageSelection(self):
+        """
+        Gère la sélection d'un fichier image, convertit si nécessaire et retourne le chemin du fichier sélectionné.
+        """
+        selected = qt.QFileDialog.getOpenFileName(
+            slicer.util.mainWindow(),
+            "Sélectionner une image",
+            "",
+            "Images (*.nrrd *.nii *.nii.gz *.mha)"
+        )
+        if not selected:
+            return None
+
+        ext = os.path.splitext(selected)[1].lower()
+        if ext in [".nii", ".nii.gz", ".mha"]:
+            try:
+                print(f"\n🔄 Conversion de {selected} en .nrrd...")
+                loadedNode = slicer.util.loadVolume(selected, returnNode=True)[1]
+                if not loadedNode:
+                    raise RuntimeError("Le fichier n'a pas pu être chargé.")
+
+                extension_dir = os.path.dirname(os.path.abspath(__file__))
+                converted_nrrd_path = os.path.join(extension_dir, "converted_input.nrrd")
+                slicer.util.saveNode(loadedNode, converted_nrrd_path)
+                print(f"\n✅ Conversion terminée : {converted_nrrd_path}")
+
+                self.tempConvertedPath = converted_nrrd_path  # ← stocké pour suppression plus tard
+                return converted_nrrd_path
+            except Exception as e:
+                qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur de conversion", f"Erreur lors de la conversion en .nrrd : {str(e)}")
+                return None
+        self.tempConvertedPath = None  # Aucun fichier temporaire
+        return selected
+
+
+    def handleDICOMSelection(self):
+        """
+        Gère la sélection d'un dossier DICOM, charge le volume DICOM et le convertit en .nrrd.
+        Retourne le chemin du fichier converti ou None en cas d'erreur.
+        """
+        dicomDir = qt.QFileDialog.getExistingDirectory(
+            slicer.util.mainWindow(),
+            "Sélectionner un dossier DICOM",
+            ""
+        )
+        if not dicomDir:
+            return None
+
+        dcmFiles = [os.path.join(dicomDir, f) for f in os.listdir(dicomDir) if f.lower().endswith(".dcm")]
+        if not dcmFiles:
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Aucun fichier DICOM trouvé.")
+            return None
+
+        success, volumeNode = slicer.util.loadVolume(dcmFiles[0], returnNode=True)
+        if success:
+            outputPath = os.path.join(dicomDir, "converted_volume.nrrd")
+            slicer.util.saveNode(volumeNode, outputPath)
+            return outputPath
+        else:
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du volume DICOM.")
+            return None
+
 
 
     def validateCheckboxes(self, sender):
@@ -489,6 +530,15 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if success:
             self.load_prediction(self.lineEditOutputPath.text)
             slicer.util.infoDisplay("✅ Segmentation terminée avec succès.")
+
+        if self.tempConvertedPath:
+            if os.path.exists(self.tempConvertedPath):
+                try:
+                    os.remove(self.tempConvertedPath)
+                    print(f"🗑️ Fichier temporaire supprimé : {self.tempConvertedPath}")
+                except Exception as e:
+                    print(f"⚠️ Erreur lors de la suppression : {e}")
+            self.tempConvertedPath = None
 
 
     def updateProgressBar(self):
