@@ -249,7 +249,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             except Exception as e:
                 qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur de conversion", f"Erreur lors de la conversion en .nrrd : {str(e)}")
                 return None
-        self.tempConvertedPath = None  # Aucun fichier temporaire
+        else:
+            slicer.util.loadVolume(selected)
+        self.tempConvertedPath = None
         return selected
 
 
@@ -279,7 +281,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         else:
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du volume DICOM.")
             return None
-
 
 
     def validateCheckboxes(self, sender):
