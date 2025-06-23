@@ -56,7 +56,7 @@
       <item row="1" column="1">
        <widget class="QPushButton" name="browseOutputButton">
         <property name="text">
-         <string>Select Output Subjects Directory</string>
+         <string>Select Output</string>
         </property>
        </widget>
       </item>

@@ -161,7 +161,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 python_exec = sys.executable
                 print(sys.executable)
                 for pkg in missing_packages:
-                    subprocess.check_call([python_exec, "-m", "pip", "install", pkg])
+                    subprocess.check_call([python_exec, "-m", "pip", "install", pkg, "--no-cache-dir"])
                 qt.QMessageBox.information(
                     slicer.util.mainWindow(), "Installation réussie",
                     "Les dépendances manquantes ont été installées avec succès."
@@ -453,7 +453,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extracted_model_path)
 
-        # Ici on part du principe que input_path est un fichier NRRD
         if not os.path.isfile(input_path) or not input_path.endswith('.nrrd'):
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur fichier", "Veuillez sélectionner un fichier NRRD valide en entrée.")
             return
@@ -462,19 +461,17 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         os.environ["nnUNet_results"] = os.path.abspath(extracted_model_path)
 
-        # Lancement de la prédiction
         self.progressBar.setVisible(True)
         self.progressBar.setValue(0)
         self.progressValue = 0
         self.elapsedSeconds = 0
         self.timer.start()
 
-        # threading.Thread(
-        #     target=self.run_segmentation_in_thread,
-        #     args=(self.imagesTs_path, output_path, model_id, configuration, fold)
-        # ).start()
-
-        self.load_prediction(self.lineEditOutputPath.text)
+        # Lancer la segmentation dans un thread pour ne pas bloquer l'interface utilisateur
+        threading.Thread(
+            target=self.run_segmentation_in_thread,
+            args=(self.imagesTs_path, output_path, model_id, configuration, fold)
+        ).start()
     
 
     def run_segmentation_in_thread(self, input_path, output_path, model_id, configuration, fold):
@@ -484,7 +481,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Args:
             input_path (str): Chemin du fichier d'entrée.
             output_path (str): Chemin du dossier de sortie.
-            model_id (str): ID du modèle à utiliser pour la segmentation.
+            model_id (str): ID du du dataset qui a été utilisé pour entraîner le modèle.
             configuration (str): Configuration du modèle.
             fold (str): Fold à utiliser pour la segmentation.
         """
@@ -559,28 +556,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         progress = int((self.elapsedSeconds / self.progressDuration) * 99)
         self.progressBar.setValue(progress)
 
-
-    # def load_prediction(self, output_path):
-    #     """
-    #     Charge la prédiction générée par nnUNet dans Slicer.
-
-    #     Args:
-    #         output_path (str): Chemin du dossier de sortie où la prédiction est enregistrée.
-    #     """
-    #     prediction_file = os.path.join(output_path, "001.nrrd")
-    #     new_path = os.path.join(output_path, "segmentation.nrrd")
-    #     os.rename(prediction_file, new_path)
-    #     self.convert_prediction_to_segmentation(new_path)
-
-    #     if not prediction_file:
-    #         qt.QMessageBox.warning(slicer.util.mainWindow(), "Erreur", "Aucune prédiction trouvée à charger.")
-    #         return
-        
-    #     loadedNode = slicer.util.loadLabelVolume(new_path)
-    #     if loadedNode:
-    #         print(f"✅ Chargé dans Slicer : {new_path}")
-    #     else:
-    #         print(f"❌ Échec du chargement : {new_path}")
 
     def load_prediction(self, output_path):
         """
