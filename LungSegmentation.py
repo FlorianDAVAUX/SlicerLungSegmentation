@@ -416,9 +416,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             else:
                 qt.QMessageBox.warning(slicer.util.mainWindow(), "Aucun modèle sélectionné", "Veuillez sélectionner au moins une structure.")
                 return
-        else:  # Exvivo
+        else: 
             if self.checkBoxExvivoParenchyma.isChecked() and self.checkBoxExvivoAirways.isChecked():
                 selected_key = "ParenchymaAirways"
+            elif self.checkBoxExvivoAirways.isChecked():
+                selected_key = "Airways"
             else:
                 qt.QMessageBox.warning(slicer.util.mainWindow(), "Modèle indisponible", "Seule la combinaison Parenchyme + Airways est supportée en Exvivo.")
                 return
@@ -467,10 +469,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.elapsedSeconds = 0
         self.timer.start()
 
-        threading.Thread(
-            target=self.run_segmentation_in_thread,
-            args=(self.imagesTs_path, output_path, model_id, configuration, fold)
-        ).start()
+        # threading.Thread(
+        #     target=self.run_segmentation_in_thread,
+        #     args=(self.imagesTs_path, output_path, model_id, configuration, fold)
+        # ).start()
+
+        self.load_prediction(self.lineEditOutputPath.text)
     
 
     def run_segmentation_in_thread(self, input_path, output_path, model_id, configuration, fold):
@@ -556,6 +560,28 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.progressBar.setValue(progress)
 
 
+    # def load_prediction(self, output_path):
+    #     """
+    #     Charge la prédiction générée par nnUNet dans Slicer.
+
+    #     Args:
+    #         output_path (str): Chemin du dossier de sortie où la prédiction est enregistrée.
+    #     """
+    #     prediction_file = os.path.join(output_path, "001.nrrd")
+    #     new_path = os.path.join(output_path, "segmentation.nrrd")
+    #     os.rename(prediction_file, new_path)
+    #     self.convert_prediction_to_segmentation(new_path)
+
+    #     if not prediction_file:
+    #         qt.QMessageBox.warning(slicer.util.mainWindow(), "Erreur", "Aucune prédiction trouvée à charger.")
+    #         return
+        
+    #     loadedNode = slicer.util.loadLabelVolume(new_path)
+    #     if loadedNode:
+    #         print(f"✅ Chargé dans Slicer : {new_path}")
+    #     else:
+    #         print(f"❌ Échec du chargement : {new_path}")
+
     def load_prediction(self, output_path):
         """
         Charge la prédiction générée par nnUNet dans Slicer.
@@ -564,18 +590,33 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             output_path (str): Chemin du dossier de sortie où la prédiction est enregistrée.
         """
         prediction_file = os.path.join(output_path, "001.nrrd")
-        new_path = os.path.join(output_path, "segmentation.nrrd")
-        os.rename(prediction_file, new_path)
 
         if not prediction_file:
             qt.QMessageBox.warning(slicer.util.mainWindow(), "Erreur", "Aucune prédiction trouvée à charger.")
             return
-        
-        loadedNode = slicer.util.loadLabelVolume(new_path)
-        if loadedNode:
-            print(f"✅ Chargé dans Slicer : {new_path}")
         else:
-            print(f"❌ Échec du chargement : {new_path}")
+            self.convert_prediction_to_segmentation(prediction_file, output_path)
+
+
+    def convert_prediction_to_segmentation(self, prediction_path, output_path, labelmap_name="segmentation", segmentation_name="segmentation"):
+        """
+        Convertit une prédiction nnUNet en segmentation Slicer.
+        """
+
+        [success, labelmapNode] = slicer.util.loadLabelVolume(prediction_path, returnNode=True)
+        if not success:
+            raise RuntimeError(f"Échec du chargement de la prédiction : {prediction_path}")
+        labelmapNode.SetName(labelmap_name)
+
+        segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
+        slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
+
+        segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
+
+        # Sauvegarder la segmentation (par défaut en .nrrd)
+        slicer.util.saveNode(segmentationNode, segmentation_path)
+
+        slicer.mrmlScene.RemoveNode(labelmapNode)
 
 
     def edit_json_for_prediction(self, extracted_model_path, input_image_path):
@@ -626,4 +667,4 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         # Stockage pour prédiction
         self.modified_dataset_json = json_path
-        self.imagesTs_path = imagesTs_path
+        self.imagesTs_path = imagesTs_path 

@@ -57,6 +57,14 @@
       "configuration": "3d_fullres",
       "num_classes": 2,
       "fold": 4
+    },
+    "Airways": {
+      "model_url": "https://github.com/FlorianDAVAUX/LungSegmentation/releases/download/AllExvivo/Exvivo.zip",
+      "model_name": "AirwaysExvivo",
+      "model_id": "001",
+      "configuration": "3d_fullres",
+      "num_classes": 1,
+      "fold": 3
     }
   }
 }
