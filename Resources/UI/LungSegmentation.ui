@@ -20,7 +20,7 @@
       <item row="0" column="0">
        <widget class="QLabel" name="labelInput">
         <property name="text">
-         <string>Directory</string>
+         <string>Subject</string>
         </property>
        </widget>
       </item>
