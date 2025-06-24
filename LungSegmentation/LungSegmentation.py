@@ -1,4 +1,5 @@
 import os
+import re
 import qt
 import slicer
 import subprocess
@@ -9,6 +10,7 @@ import logging
 import urllib
 import sys
 import slicer
+import torch
 import tempfile
 import threading
 from qt import QTimer
@@ -44,6 +46,7 @@ class LungSegmentation(ScriptedLoadableModule):
         self.parent = parent
         self.imagesTs_path = None
         self.parent.icon = qt.QIcon(os.path.join(os.path.dirname(__file__), 'Resources', 'Icons', 'LungSegmentation.png'))
+        
 
 ####################################################### Classe pour l'interface graphique du module ######################################################
 
@@ -82,6 +85,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         self.extensionPath = os.path.dirname(__file__)
         uiFilePath = os.path.join(self.extensionPath, 'Resources', 'UI', 'LungSegmentation.ui')
+        self.nnUNetv2_predict = os.path.join(self.extensionPath, 'Resources', 'nnUNetv2_predict')
         
         # Chargement correct de l'UI
         uiWidget = slicer.util.loadUI(uiFilePath)
@@ -152,7 +156,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if install == qt.QMessageBox.Yes:
             try:
                 python_exec = sys.executable
-                print(sys.executable)
                 for pkg in missing_packages:
                     subprocess.check_call([python_exec, "-m", "pip", "install", pkg, "--no-cache-dir"])
                 qt.QMessageBox.information(
@@ -511,7 +514,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         ).start()
     
 
-    def run_segmentation_in_thread(self, input_path, output_path, model_id, configuration, fold):
+    def run_segmentation_in_thread(self, input_path, output_path, dataset_id, configuration, fold):
         """
         Exécute la segmentation dans un thread séparé pour éviter de bloquer l'interface utilisateur.
         
@@ -523,10 +526,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             fold (str): Fold à utiliser pour la segmentation.
         """
         command = [
-            "nnUNetv2_predict",
+            sys.executable,
+            self.nnUNetv2_predict,
             "-i", input_path,
             "-o", output_path,
-            "-d", model_id,
+            "-d", dataset_id,
             "-c", configuration,
             "-f", fold,
         ]
