@@ -523,7 +523,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             fold (str): Fold à utiliser pour la segmentation.
         """
         command = [
-            sys.executable, "-m", "nnunetv2.inference.predict_from_raw_data",
+            "nnUNetv2_predict",
             "-i", input_path,
             "-o", output_path,
             "-d", model_id,
