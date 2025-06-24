@@ -198,6 +198,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             if selectedDir:
                 self.lineEditOutputPath.setText(selectedDir)
 
+
     def selectInputFile(self):
         """
         Affiche une boîte de dialogue pour sélectionner un fichier image ou un dossier DICOM.
@@ -217,6 +218,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         elif clicked == dicomButton:
             return self.handleDICOMSelection()
         return None
+
 
     def handleImageSelection(self):
         """
@@ -321,7 +323,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             return
 
 
-    def check_combination_and_warn(self, parenchyme_checked: bool, airways_checked: bool, vascular_checked: bool, lobes_checked: bool) -> bool:
+    def check_combination_and_warn_invivo(self, parenchyme_checked: bool, airways_checked: bool, vascular_checked: bool, lobes_checked: bool) -> bool:
         """
         Vérifie la combinaison des cases à cocher et affiche un avertissement si la combinaison est invalide.
 
@@ -356,13 +358,46 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         msgBox.setIcon(QMessageBox.Warning)
         msgBox.setText("La combinaison sélectionnée n'est pas autorisée.")
         msgBox.setInformativeText(
-            "Combinaisons autorisées :\n"
+            "Combinaisons autorisées en in vivo:\n"
             "• Lobes seuls\n"
             "• Parenchyme seul\n"
             "• Airways seul\n"
             "• Vascular seul\n"
             "• Parenchyme + Airways\n"
             "• Parenchyme + Airways + Vascular"
+        )
+        msgBox.setWindowTitle("Combinaison invalide")
+        msgBox.setStandardButtons(QMessageBox.Ok)
+        msgBox.exec_()
+
+        return False
+
+
+    def check_combination_and_warn_exvivo(self, parenchyme_checked: bool, airways_checked: bool) -> bool:
+       
+        total_checked = parenchyme_checked + airways_checked
+
+        # Cas valides
+        if parenchyme_checked or airways_checked:
+            valid = True
+        elif airways_checked:
+            valid = True
+        elif parenchyme_checked:
+            valid = False
+        else:
+            valid = False
+
+        if valid:
+            return True
+
+        # Cas invalides → pop-up
+        msgBox = QMessageBox()
+        msgBox.setIcon(QMessageBox.Warning)
+        msgBox.setText("La combinaison sélectionnée n'est pas autorisée.")
+        msgBox.setInformativeText(
+            "Combinaisons autorisées en ex vivo:\n"
+            "• Airways seul\n"
+            "• Parenchyme + Airways"
         )
         msgBox.setWindowTitle("Combinaison invalide")
         msgBox.setStandardButtons(QMessageBox.Ok)
@@ -386,19 +421,24 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Elle vérifie les cases à cocher, charge la configuration, télécharge le modèle si nécessaire,
         prépare les chemins d'entrée et de sortie, et lance la segmentation.
         """
-        if not self.check_combination_and_warn(
-            self.checkBoxInvivoParenchyma.isChecked(),
-            self.checkBoxInvivoAirways.isChecked(),
-            self.checkBoxInvivoVascularTree.isChecked(),
-            self.checkBoxInvivoLobes.isChecked()
-        ):
-            return
-
-        print("\n📣 Lancement de la segmentation...")
-
         config = self.loadConfig()
 
         mode = "Invivo" if self.checkBoxInvivoParenchyma.isChecked() or self.checkBoxInvivoAirways.isChecked() or self.checkBoxInvivoVascularTree.isChecked() or self.checkBoxInvivoLobes.isChecked() else "Exvivo"
+
+        if mode == "Invivo":
+            if not self.check_combination_and_warn_invivo(
+                self.checkBoxInvivoParenchyma.isChecked(),
+                self.checkBoxInvivoAirways.isChecked(),
+                self.checkBoxInvivoVascularTree.isChecked(),
+                self.checkBoxInvivoLobes.isChecked()
+            ):
+                return
+        else:
+            if not self.check_combination_and_warn_exvivo(
+                self.checkBoxExvivoParenchyma.isChecked(),
+                self.checkBoxExvivoAirways.isChecked()
+            ):
+                return
 
         if mode == "Invivo":
             if self.checkBoxInvivoParenchyma.isChecked() and self.checkBoxInvivoAirways.isChecked() and self.checkBoxInvivoVascularTree.isChecked():
@@ -430,6 +470,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         except KeyError:
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur de configuration", f"Aucune configuration trouvée pour {mode} > {selected_key}")
             return
+        
+        print("\n📣 Lancement de la segmentation...")
 
         model_url = model_info["model_url"]
         model_id = model_info["model_id"]
