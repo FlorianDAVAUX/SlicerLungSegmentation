@@ -136,6 +136,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             "nnunetv2": "nnunetv2"
         }
 
+        self.nnUNet_installation()
+
+
         missing_packages = []
 
         # Vérification de l'importabilité des modules
@@ -171,12 +174,32 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                     slicer.util.mainWindow(), "Échec de l'installation",
                     f"Erreur pendant l'installation :\n{str(e)}"
                 )
+
+            self.nnUNet_installation()
+        
         else:
             qt.QMessageBox.warning(
                 slicer.util.mainWindow(), "Modules manquants",
                 "Vous devez installer les dépendances pour utiliser cette extension."
             )
+        
 
+    def nnUNet_installation(self):
+        """
+        Vérifie si nnUNet est installé et propose de l'installer si nécessaire.
+        """
+        extension_root = os.path.dirname(os.path.dirname(slicer.util.modulePath("LungSegmentation")))
+
+        nnunet_dir = os.path.join(extension_root, "nnUNet")
+
+        if not os.path.exists(nnunet_dir):
+            print(f"🔄 Répertoire nnUNet non trouvé")
+            repo_url = "https://github.com/MIC-DKFZ/nnUNet.git"
+            python_exec = sys.executable
+            subprocess.check_call(["git", "clone", repo_url, nnunet_dir])
+            subprocess.check_call([python_exec, "-m", "pip", "install", "-e", "."], cwd=nnunet_dir)
+        else:
+            print("✅ Répertoire nnUNet déjà présent.")
 
     def openDialog(self, which):
         """
@@ -528,7 +551,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             fold (str): Fold à utiliser pour la segmentation.
         """
         command = [
-            "nnUNetv2_predict",
+            sys.executable, "-m", "nnunetv2.inference.predict_from_raw_data",
             "-i", input_path,
             "-o", output_path,
             "-d", model_id,
