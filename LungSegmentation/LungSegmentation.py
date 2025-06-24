@@ -85,7 +85,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         self.extensionPath = os.path.dirname(__file__)
         uiFilePath = os.path.join(self.extensionPath, 'Resources', 'UI', 'LungSegmentation.ui')
-        self.nnUNetv2_predict = os.path.join(self.extensionPath, 'Resources', 'nnUNetv2_predict')
+        self.prediction = os.path.join(self.extensionPath, 'Resources', 'prediction')
         
         # Chargement correct de l'UI
         uiWidget = slicer.util.loadUI(uiFilePath)
@@ -525,14 +525,23 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             configuration (str): Configuration du modèle.
             fold (str): Fold à utiliser pour la segmentation.
         """
+
+        # On regarde si un gpu existe
+        if torch.cuda.is_available():
+            device = 'cuda'
+        else:
+            device = 'cpu'
+
         command = [
             sys.executable,
-            self.nnUNetv2_predict,
+            self.prediction,
             "-i", input_path,
             "-o", output_path,
             "-d", dataset_id,
             "-c", configuration,
             "-f", fold,
+            "-device", device,
+            "--disable_progress_bar"
         ]
 
         self.progressBar.setValue(0)
