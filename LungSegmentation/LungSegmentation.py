@@ -125,19 +125,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Vérifie si les dépendances nécessaires sont installées et propose de les installer si elles manquent.
         """
         required_packages = {
-            "torch": "torch",
-            "numpy": "numpy",
-            "scikit-learn": "sklearn",
-            "SimpleITK": "SimpleITK",
-            "nibabel": "nibabel",
-            "tqdm": "tqdm",
-            "blosc2": "blosc2",
-            "acvl-utils": "acvl_utils",
             "nnunetv2": "nnunetv2"
         }
-
-        self.nnUNet_installation()
-
 
         missing_packages = []
 
@@ -159,6 +148,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             f"Les modules suivants sont manquants :\n{', '.join(missing_packages)}\nVoulez-vous les installer maintenant ?",
             qt.QMessageBox.Yes | qt.QMessageBox.No
         )
+
         if install == qt.QMessageBox.Yes:
             try:
                 python_exec = sys.executable
@@ -174,8 +164,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                     slicer.util.mainWindow(), "Échec de l'installation",
                     f"Erreur pendant l'installation :\n{str(e)}"
                 )
-
-            self.nnUNet_installation()
         
         else:
             qt.QMessageBox.warning(
@@ -184,22 +172,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             )
         
 
-    def nnUNet_installation(self):
-        """
-        Vérifie si nnUNet est installé et propose de l'installer si nécessaire.
-        """
-        extension_root = os.path.dirname(os.path.dirname(slicer.util.modulePath("LungSegmentation")))
-
-        nnunet_dir = os.path.join(extension_root, "nnUNet")
-
-        if not os.path.exists(nnunet_dir):
-            print(f"🔄 Répertoire nnUNet non trouvé")
-            repo_url = "https://github.com/MIC-DKFZ/nnUNet.git"
-            python_exec = sys.executable
-            subprocess.check_call(["git", "clone", repo_url, nnunet_dir])
-            subprocess.check_call([python_exec, "-m", "pip", "install", "-e", "."], cwd=nnunet_dir)
-        else:
-            print("✅ Répertoire nnUNet déjà présent.")
 
     def openDialog(self, which):
         """
