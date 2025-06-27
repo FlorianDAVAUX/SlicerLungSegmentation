@@ -1,7 +1,7 @@
 # 🫁 LungSegmentation
 
 <p align="center">
-  <img src="Resources/Icons/LungSegmentation.png" alt="Logo" width="200"/>
+  <img src="LungSegmentation/Resources/Icons/LungSegmentation.png" alt="Logo" width="200"/>
 </p>
 
 **LungSegmentation** est une extension pour [3D Slicer](https://www.slicer.org/) permettant la **segmentation automatique des structures pulmonaires** (parenchyme, voies aériennes, arbre vasculaire) à partir d’images médicales (DICOM ou NRRD), à l’aide d’un modèle **nnU-Netv2** pré-entraîné.
