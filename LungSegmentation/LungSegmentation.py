@@ -529,6 +529,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # On regarde si un gpu existe
         if torch.cuda.is_available():
             device = 'cuda'
+        # si c'est un apple silicon, on utilise le gpu apple silicon
+        elif torch.backends.mps.is_available():
+            device = 'mps'
         else:
             device = 'cpu'
 
