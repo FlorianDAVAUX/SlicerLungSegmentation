@@ -1,21 +1,22 @@
 import os
 import re
 import qt
+import sys
 import slicer
+import platform
 import subprocess
 import shutil
 import zipfile
 import json
+import tarfile
 import logging
 import urllib
-import sys
 import slicer
-import torch
 import tempfile
 import threading
-from qt import QTimer
+import importlib.util
 from slicer.ScriptedLoadableModule import *
-from qt import QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
+from qt import QTimer, QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
 
 
 ###################################################### Objet pour les signaux permettant de savoir si la segmentation est terminée ou s'il y a une erreur ######################################################
@@ -70,10 +71,14 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         self.tempConvertedPath = None  # Pour stocker le chemin du fichier temporaire converti
 
-
         self.signals = SegmentationSignals()
         self.signals.finished.connect(self.on_segmentation_finished)
         self.signals.error.connect(self.on_segmentation_error)
+
+        self.extracted_model_path = None
+        self.customPythonPath = None
+
+        self.prediction = None
 
 
     def setup(self):
@@ -81,11 +86,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Configuration de l'interface graphique du module
         """
         self.install_dependencies_if_needed()
+
         ScriptedLoadableModuleWidget.setup(self)
 
         self.extensionPath = os.path.dirname(__file__)
         uiFilePath = os.path.join(self.extensionPath, 'Resources', 'UI', 'LungSegmentation.ui')
-        self.prediction = os.path.join(self.extensionPath, 'Resources', 'prediction')
         
         # Chargement correct de l'UI
         uiWidget = slicer.util.loadUI(uiFilePath)
@@ -122,60 +127,53 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.browseInputButton.clicked.connect(lambda: self.openDialog("input"))
         self.browseOutputButton.clicked.connect(lambda: self.openDialog("output"))
         self.segmentationButton.clicked.connect(self.onSegmentationButtonClicked)
-    
-    
-    def install_dependencies_if_needed(self):
-        """
-        Vérifie si les dépendances nécessaires sont installées et propose de les installer si elles manquent.
-        """
-        required_packages = {
-            "nnunetv2": "nnunetv2"
-        }
 
-        missing_packages = []
 
-        # Vérification de l'importabilité des modules
-        for pip_name, import_name in required_packages.items():
-            try:
-                module = __import__(import_name)
-            except ImportError:
-                missing_packages.append(pip_name)
+    def get_env_url(self):
+        system = platform.system()
 
-        if not missing_packages:
-            print("✅ Tous les paquets requis sont installés.")
-            return
-
-        # Afficher la boîte de dialogue pour installation
-        install = qt.QMessageBox.question(
-            slicer.util.mainWindow(),
-            "Modules manquants",
-            f"Les modules suivants sont manquants :\n{', '.join(missing_packages)}\nVoulez-vous les installer maintenant ?",
-            qt.QMessageBox.Yes | qt.QMessageBox.No
-        )
-
-        if install == qt.QMessageBox.Yes:
-            try:
-                python_exec = sys.executable
-                for pkg in missing_packages:
-                    subprocess.check_call([python_exec, "-m", "pip", "install", pkg, "--no-cache-dir"])
-                qt.QMessageBox.information(
-                    slicer.util.mainWindow(), "Installation réussie",
-                    "Les dépendances manquantes ont été installées avec succès."
-                )
-            except subprocess.CalledProcessError as e:
-                qt.QMessageBox.critical(
-                    slicer.util.mainWindow(), "Échec de l'installation",
-                    f"Erreur pendant l'installation :\n{str(e)}"
-                )
-        
+        if system == "Windows":
+            return base_url + "python_env_win.zip"
+        elif system == "Linux":
+            print("⚠️ Attention : l'environnement Python pour Linux est en cours de développement. Il peut ne pas fonctionner correctement.")
+            return "https://github.com/FlorianDAVAUX/SlicerLungSegmentation/releases/download/linux_env/python_env_linux.tar.gz"
+        elif system == "Darwin":
+            return "https://github.com/FlorianDAVAUX/SlicerLungSegmentation/releases/download/mac_env/python_env_mac.tar.gz"
         else:
-            qt.QMessageBox.warning(
-                slicer.util.mainWindow(), "Modules manquants",
-                "Vous devez installer les dépendances pour utiliser cette extension."
-            )
+            raise RuntimeError(f"OS non supporté : {system} / {machine}")
+
+
+    def get_python_exec(self, env_path):
+        if platform.system() == "Windows":
+            return os.path.join(env_path, 'python_env_windows', "python.exe")
+        elif platform.system() == "Linux":
+            self.prediction = os.path.join(env_path, 'python_env_linux', "bin","nnUNet_predict")
+            return os.path.join(env_path, 'python_env_linux', "bin", "python")
+        else:
+            self.prediction = os.path.join(env_path, 'python_env_mac', "bin","nnUNet_predict")
+            return os.path.join(env_path, 'python_env_mac', "bin", "python")
+
+
+    def download_and_extract_env(self, dest_folder):
+        url = self.get_env_url()
         
+        os.makedirs(dest_folder, exist_ok=True)
+        print(dest_folder)
 
+        archive_path = os.path.join(dest_folder, os.path.basename(url))
+        urllib.request.urlretrieve(url, archive_path)
+        print(f"Téléchargé : {archive_path}")
 
+        # ✅ Extraction
+        if archive_path.endswith(".tar.gz"):
+            with tarfile.open(archive_path, "r:gz") as tar:
+                tar.extractall(dest_folder)
+        else:
+            raise ValueError("Format non supporté")
+
+        os.remove(archive_path)
+    
+    
     def openDialog(self, which):
         """
         Ouvre une boîte de dialogue pour sélectionner un fichier ou un dossier.
@@ -321,12 +319,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             return
 
 
-    def check_combination_and_warn_invivo(self, parenchyme_checked: bool, airways_checked: bool, vascular_checked: bool, lobes_checked: bool) -> bool:
+    def check_combination_and_warn_invivo(self, parenchyma_checked: bool, airways_checked: bool, vascular_checked: bool, lobes_checked: bool) -> bool:
         """
         Vérifie la combinaison des cases à cocher et affiche un avertissement si la combinaison est invalide.
 
         Args:
-            parenchyme_checked: booléen indiquant si la case Parenchyme est cochée
+            parenchyma_checked: booléen indiquant si la case Parenchyme est cochée
             airways_checked: booléen indiquant si la case Airways est cochée
             vascular_checked: booléen indiquant si la case Vascular Tree est cochée
             lobes_checked: booléen indiquant si la case Lobes est cochée
@@ -334,16 +332,16 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Return:
             True si la combinaison est valide, False sinon
         """
-        total_checked = parenchyme_checked + airways_checked + vascular_checked + lobes_checked
+        total_checked = parenchyma_checked + airways_checked + vascular_checked + lobes_checked
 
         # Cas valides
         if total_checked == 1:
             return True
-        if lobes_checked and (parenchyme_checked or airways_checked or vascular_checked):
+        if lobes_checked and (parenchyma_checked or airways_checked or vascular_checked):
             valid = False
-        elif parenchyme_checked and airways_checked and not vascular_checked and not lobes_checked:
+        elif parenchyma_checked and airways_checked and not vascular_checked and not lobes_checked:
             valid = True
-        elif parenchyme_checked and airways_checked and vascular_checked and not lobes_checked:
+        elif parenchyma_checked and airways_checked and vascular_checked and not lobes_checked:
             valid = True
         else:
             valid = False
@@ -371,16 +369,25 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         return False
 
 
-    def check_combination_and_warn_exvivo(self, parenchyme_checked: bool, airways_checked: bool) -> bool:
+    def check_combination_and_warn_exvivo(self, parenchyma_checked: bool, airways_checked: bool) -> bool:
+        """
+        Vérifie la combinaison des cases à cocher pour Exvivo et affiche un avertissement si la combinaison est invalide.
+        
+        Args:
+            parenchyma_checked: booléen indiquant si la case Parenchyme est cochée
+            airways_checked: booléen indiquant si la case Airways est cochée
+        Return:
+            True si la combinaison est valide, False sinon
+        """
        
-        total_checked = parenchyme_checked + airways_checked
+        total_checked = parenchyma_checked + airways_checked
 
         # Cas valides
-        if parenchyme_checked or airways_checked:
+        if parenchyma_checked or airways_checked:
             valid = True
         elif airways_checked:
             valid = True
-        elif parenchyme_checked:
+        elif parenchyma_checked:
             valid = False
         else:
             valid = False
@@ -472,7 +479,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         print("\n📣 Lancement de la segmentation...")
 
         model_url = model_info["model_url"]
-        model_id = model_info["model_id"]
+        dataset_id = model_info["model_id"]
         configuration = model_info["configuration"]
         fold = str(model_info["fold"])
         model_name = model_info["model_name"]
@@ -482,24 +489,24 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         temp_path = slicer.app.temporaryPath if slicer.app.temporaryPath else tempfile.gettempdir()
         model_zip_path = os.path.join(temp_path, model_name + ".zip")
-        extracted_model_path = os.path.join(temp_path, model_name)
+        self.extracted_model_path = os.path.join(temp_path, model_name)
 
         if not os.path.exists(model_zip_path):
             print("\n🔽 Téléchargement du modèle depuis GitHub...")
             urllib.request.urlretrieve(model_url, model_zip_path)
             print("\n✅ Modèle téléchargé")
 
-        if not os.path.exists(extracted_model_path):
+        if not os.path.exists(self.extracted_model_path):
             with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
-                zip_ref.extractall(extracted_model_path)
+                zip_ref.extractall(self.extracted_model_path)
 
         if not os.path.isfile(input_path) or not input_path.endswith('.nrrd'):
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur fichier", "Veuillez sélectionner un fichier NRRD valide en entrée.")
             return
 
-        self.edit_json_for_prediction(extracted_model_path, input_path)
+        self.edit_json_for_prediction(input_path)
 
-        os.environ["nnUNet_results"] = os.path.abspath(extracted_model_path)
+        os.environ["nnUNet_results"] = os.path.abspath(self.extracted_model_path)
 
         self.progressBar.setVisible(True)
         self.progressBar.setValue(0)
@@ -507,56 +514,193 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.elapsedSeconds = 0
         self.timer.start()
 
-        # Lancer la segmentation dans un thread pour ne pas bloquer l'interface utilisateur
+        # self.launch_segmentation(input_path, output_path, dataset_id, configuration, fold)
         threading.Thread(
             target=self.run_segmentation_in_thread,
-            args=(self.imagesTs_path, output_path, model_id, configuration, fold)
+            args=(self.imagesTs_path, output_path, dataset_id, configuration, fold),
         ).start()
     
 
     def run_segmentation_in_thread(self, input_path, output_path, dataset_id, configuration, fold):
         """
-        Exécute la segmentation dans un thread séparé pour éviter de bloquer l'interface utilisateur.
-        
+        Fonction exécutée dans un thread secondaire pour lancer la segmentation.
+        Elle prépare l'environnement, exécute la commande de segmentation et gère les sorties.
+
         Args:
-            input_path (str): Chemin du fichier d'entrée.
-            output_path (str): Chemin du dossier de sortie.
-            model_id (str): ID du du dataset qui a été utilisé pour entraîner le modèle.
-            configuration (str): Configuration du modèle.
-            fold (str): Fold à utiliser pour la segmentation.
+            input_path (str): Chemin du fichier d'entrée (.nrrd).
+            output_path (str): Chemin du dossier de sortie pour les résultats de segmentation.
+            dataset_id (str): Identifiant du dataset pour la segmentation.
+            configuration (str): Configuration du modèle à utiliser pour la segmentation.
+            fold (str): Numéro de fold à utiliser pour la segmentation.
         """
-
-        # On regarde si un gpu existe
-        if torch.cuda.is_available():
-            device = 'cuda'
-        # si c'est un apple silicon, on utilise le gpu apple silicon
-        elif torch.backends.mps.is_available():
-            device = 'mps'
-        else:
-            device = 'cpu'
-
+        
         command = [
-            sys.executable,
-            self.prediction,
+            "nnUNetv2_predict",
             "-i", input_path,
             "-o", output_path,
             "-d", dataset_id,
             "-c", configuration,
             "-f", fold,
-            "-device", device,
-            "--disable_progress_bar"
         ]
 
-        self.progressBar.setValue(0)
-        self.progressBar.setVisible(True)
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            universal_newlines=True
+        )
 
-        try:
-            subprocess.run(command, check=True)
-            self.signals.finished.emit(True)
-        except subprocess.CalledProcessError as e:
-            self.signals.error.emit(str(e))
+        for line in process.stdout:
+            print(line, end='')
         
     
+    def install_dependencies_if_needed(self):
+        """
+        Vérifie si numpy==1.26.4, blosc2==2.5.1 et nnunetv2 sont installés.
+        Si ce n'est pas le cas, installe les bonnes versions puis ferme Slicer pour reload.
+        """
+        import importlib
+
+        required_versions = {
+            "numpy": "1.26.4",
+            "blosc2": "2.5.1",
+            "nnunetv2": None,
+        }
+
+        to_install = []
+
+        # Check numpy
+        try:
+            import numpy
+            if numpy.__version__ != required_versions["numpy"]:
+                print(f"❌ numpy version {numpy.__version__} trouvée, {required_versions['numpy']} requise.")
+                to_install.append(f"numpy=={required_versions['numpy']}")
+            else:
+                print(f"✅ numpy {numpy.__version__} OK")
+        except ImportError:
+            print("❌ numpy non installé")
+            to_install.append(f"numpy=={required_versions['numpy']}")
+
+        # Check blosc2
+        try:
+            import blosc2
+            if blosc2.__version__ != required_versions["blosc2"]:
+                print(f"❌ blosc2 version {blosc2.__version__} trouvée, {required_versions['blosc2']} requise.")
+                to_install.append(f"blosc2=={required_versions['blosc2']}")
+            else:
+                print(f"✅ blosc2 {blosc2.__version__} OK")
+        except ImportError:
+            print("❌ blosc2 non installé")
+            to_install.append(f"blosc2=={required_versions['blosc2']}")
+
+        # Check nnunetv2
+        try:
+            nnunetv2_spec = importlib.util.find_spec("nnunetv2")
+            if nnunetv2_spec is None:
+                raise ImportError
+            print("✅ nnunetv2 OK")
+        except ImportError:
+            print("❌ nnunetv2 non installé")
+            to_install.append("nnunetv2")
+
+        if to_install:
+            msg = "Les dépendances suivantes vont être installées ou mises à jour :\n" + "\n".join(to_install)
+            msg += "\n\nSlicer va se fermer automatiquement après l'installation. Veuillez le relancer."
+            qt.QMessageBox.information(
+                slicer.util.mainWindow(), "Installation des dépendances", msg
+            )
+            python_exec = sys.executable
+            for pkg in to_install:
+                subprocess.check_call([python_exec, "-m", "pip", "install", "--upgrade", "--no-cache-dir", pkg])
+            slicer.util.mainWindow().close()
+            sys.exit(0)
+        else:
+            print("✅ Toutes les dépendances sont à la bonne version.")
+    
+
+    # def launch_segmentation(self, input_path, output_path, dataset_id, configuration, fold):
+    #     env_path = os.path.join(self.extensionPath, "Resources", "python_env")
+    #     python_exec = self.get_python_exec(env_path)
+    #     print(f"\n📂 Chemin de l'environnement Python : {python_exec}")
+
+    #     if not os.path.exists(python_exec):
+    #         qt.QMessageBox.information(
+    #             slicer.util.mainWindow(), "Initialisation", "Téléchargement de l'environnement Python..."
+    #         )
+    #         self.download_and_extract_env(env_path)
+        
+    #     print(f"\n📂 Environnement Python trouvé : {python_exec}")
+
+    #     # Lancer dans un thread secondaire SEULEMENT APRÈS
+    #     threading.Thread(
+    #         target=self.run_segmentation_in_thread,
+    #         args=(python_exec, output_path, dataset_id, configuration, fold),
+    #     ).start()
+
+
+    # def run_segmentation_in_thread(self, python_exec, output_path, dataset_id, configuration, fold):
+
+    #     args = [
+    #         self.prediction,
+    #         "-i", self.imagesTs_path,
+    #         "-o", output_path,
+    #         "-d", dataset_id,
+    #         "-c", configuration,
+    #         "-f", fold,
+    #         "-device", "cuda",
+    #         "--disable_progress_bar"
+    #     ]
+
+    #     # === ENVIRONNEMENT NETTOYÉ ABSOLUMENT CRUCIAL ===
+    #     clean_env = {}
+
+    #     # Variables système minimales à conserver
+    #     for key in ["HOME", "LOGNAME", "USER", "PATH", "TMPDIR", "SHELL"]:
+    #         if key in os.environ:
+    #             clean_env[key] = os.environ[key]
+
+    #     # On force le PATH vers le bin du venv
+    #     venv_bin = os.path.dirname(python_exec)
+    #     print(f"📂 Chemin du venv : {venv_bin}")
+    #     clean_env["PATH"] = venv_bin + os.pathsep + clean_env.get("PATH", "")
+
+    #     # Supprimer toute variable qui pourrait polluer Python
+    #     clean_env["PYTHONPATH"] = ""
+    #     clean_env["PYTHONHOME"] = ""
+    #     clean_env["LD_LIBRARY_PATH"] = ""
+    #     clean_env["DYLD_LIBRARY_PATH"] = ""
+
+    #     clean_env["nnUNet_results"] = os.path.abspath(self.extracted_model_path)
+    #     clean_env["nnUNet_preprocessed"] = os.path.abspath(self.extracted_model_path)
+    #     clean_env["nnUNet_raw"] = os.path.abspath(self.extracted_model_path)
+
+    #     # Lancer
+    #     print(f"📣 Lancement réel (python venv) : {python_exec} {' '.join(args)}")
+    #     subprocess.run([python_exec] + args, env=clean_env, check=True)
+    
+
+    # def get_torch_device(self, python_exec):
+
+    #     check_device_code = """
+    #         import torch
+    #         if torch.cuda.is_available():
+    #             print("cuda")
+    #         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    #             print("mps")
+    #         else:
+    #             print("cpu")
+    #     """
+
+    #     result = subprocess.run(
+    #         [python_exec, "-c", check_device_code],
+    #         stdout=subprocess.PIPE,
+    #         stderr=subprocess.PIPE,
+    #         text=True,
+    #     )
+    #     return result.stdout.strip()
+
+
     def on_segmentation_error(self, error_message):
         """
         Fonction appelée en cas d'erreur lors de la segmentation.
@@ -647,7 +791,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         slicer.mrmlScene.RemoveNode(labelmapNode)
 
 
-    def edit_json_for_prediction(self, extracted_model_path, input_image_path):
+    def edit_json_for_prediction(self, input_image_path):
         """
         Modifie le fichier dataset.json pour préparer la prédiction.
 
@@ -656,7 +800,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             input_image_path (str): Chemin du fichier d'image d'entrée à utiliser pour la prédiction.
         """
         json_path = None
-        for root, dirs, files in os.walk(extracted_model_path):
+        for root, dirs, files in os.walk(self.extracted_model_path):
             if "dataset.json" in files:
                 json_path = os.path.abspath(os.path.join(root, "dataset.json"))
                 break
