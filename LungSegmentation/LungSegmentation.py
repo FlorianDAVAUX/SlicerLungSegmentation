@@ -18,7 +18,6 @@ import importlib.util
 from slicer.ScriptedLoadableModule import *
 from qt import QTimer, QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
 
-
 ###################################################### Objet pour les signaux permettant de savoir si la segmentation est terminée ou s'il y a une erreur ######################################################
 
 class SegmentationSignals(QObject):
@@ -66,7 +65,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.timer.timeout.connect(self.updateProgressBar)
 
         self.progressValue = 0
-        self.progressDuration = 5 * 60  
+        self.progressDuration = 6 * 60  
         self.elapsedSeconds = 0
 
         self.tempConvertedPath = None  # Pour stocker le chemin du fichier temporaire converti
@@ -127,51 +126,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.browseInputButton.clicked.connect(lambda: self.openDialog("input"))
         self.browseOutputButton.clicked.connect(lambda: self.openDialog("output"))
         self.segmentationButton.clicked.connect(self.onSegmentationButtonClicked)
-
-
-    def get_env_url(self):
-        system = platform.system()
-
-        if system == "Windows":
-            return base_url + "python_env_win.zip"
-        elif system == "Linux":
-            print("⚠️ Attention : l'environnement Python pour Linux est en cours de développement. Il peut ne pas fonctionner correctement.")
-            return "https://github.com/FlorianDAVAUX/SlicerLungSegmentation/releases/download/linux_env/python_env_linux.tar.gz"
-        elif system == "Darwin":
-            return "https://github.com/FlorianDAVAUX/SlicerLungSegmentation/releases/download/mac_env/python_env_mac.tar.gz"
-        else:
-            raise RuntimeError(f"OS non supporté : {system} / {machine}")
-
-
-    def get_python_exec(self, env_path):
-        if platform.system() == "Windows":
-            return os.path.join(env_path, 'python_env_windows', "python.exe")
-        elif platform.system() == "Linux":
-            self.prediction = os.path.join(env_path, 'python_env_linux', "bin","nnUNet_predict")
-            return os.path.join(env_path, 'python_env_linux', "bin", "python")
-        else:
-            self.prediction = os.path.join(env_path, 'python_env_mac', "bin","nnUNet_predict")
-            return os.path.join(env_path, 'python_env_mac', "bin", "python")
-
-
-    def download_and_extract_env(self, dest_folder):
-        url = self.get_env_url()
-        
-        os.makedirs(dest_folder, exist_ok=True)
-        print(dest_folder)
-
-        archive_path = os.path.join(dest_folder, os.path.basename(url))
-        urllib.request.urlretrieve(url, archive_path)
-        print(f"Téléchargé : {archive_path}")
-
-        # ✅ Extraction
-        if archive_path.endswith(".tar.gz"):
-            with tarfile.open(archive_path, "r:gz") as tar:
-                tar.extractall(dest_folder)
-        else:
-            raise ValueError("Format non supporté")
-
-        os.remove(archive_path)
     
     
     def openDialog(self, which):
@@ -512,7 +466,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.progressBar.setValue(0)
         self.progressValue = 0
         self.elapsedSeconds = 0
-        self.timer.start()
+
+        qt.QTimer.singleShot(0, self.timer.start)
 
         # self.launch_segmentation(input_path, output_path, dataset_id, configuration, fold)
         threading.Thread(
@@ -533,6 +488,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             configuration (str): Configuration du modèle à utiliser pour la segmentation.
             fold (str): Numéro de fold à utiliser pour la segmentation.
         """
+        # import torch 
+        # device = "cuda" if torch.cuda.is_available() else "cpu"
         
         command = [
             "nnUNetv2_predict",
@@ -554,6 +511,15 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         for line in process.stdout:
             print(line, end='')
         
+        # Wait for the process to finish
+        process.stdout.close()
+        return_code = process.wait()
+
+        if return_code != 0:
+            self.signals.error.emit("❌ Erreur simulée")
+        else:
+            self.signals.finished.emit(True)
+
     
     def install_dependencies_if_needed(self):
         """
@@ -618,88 +584,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         else:
             print("✅ Toutes les dépendances sont à la bonne version.")
     
-
-    # def launch_segmentation(self, input_path, output_path, dataset_id, configuration, fold):
-    #     env_path = os.path.join(self.extensionPath, "Resources", "python_env")
-    #     python_exec = self.get_python_exec(env_path)
-    #     print(f"\n📂 Chemin de l'environnement Python : {python_exec}")
-
-    #     if not os.path.exists(python_exec):
-    #         qt.QMessageBox.information(
-    #             slicer.util.mainWindow(), "Initialisation", "Téléchargement de l'environnement Python..."
-    #         )
-    #         self.download_and_extract_env(env_path)
-        
-    #     print(f"\n📂 Environnement Python trouvé : {python_exec}")
-
-    #     # Lancer dans un thread secondaire SEULEMENT APRÈS
-    #     threading.Thread(
-    #         target=self.run_segmentation_in_thread,
-    #         args=(python_exec, output_path, dataset_id, configuration, fold),
-    #     ).start()
-
-
-    # def run_segmentation_in_thread(self, python_exec, output_path, dataset_id, configuration, fold):
-
-    #     args = [
-    #         self.prediction,
-    #         "-i", self.imagesTs_path,
-    #         "-o", output_path,
-    #         "-d", dataset_id,
-    #         "-c", configuration,
-    #         "-f", fold,
-    #         "-device", "cuda",
-    #         "--disable_progress_bar"
-    #     ]
-
-    #     # === ENVIRONNEMENT NETTOYÉ ABSOLUMENT CRUCIAL ===
-    #     clean_env = {}
-
-    #     # Variables système minimales à conserver
-    #     for key in ["HOME", "LOGNAME", "USER", "PATH", "TMPDIR", "SHELL"]:
-    #         if key in os.environ:
-    #             clean_env[key] = os.environ[key]
-
-    #     # On force le PATH vers le bin du venv
-    #     venv_bin = os.path.dirname(python_exec)
-    #     print(f"📂 Chemin du venv : {venv_bin}")
-    #     clean_env["PATH"] = venv_bin + os.pathsep + clean_env.get("PATH", "")
-
-    #     # Supprimer toute variable qui pourrait polluer Python
-    #     clean_env["PYTHONPATH"] = ""
-    #     clean_env["PYTHONHOME"] = ""
-    #     clean_env["LD_LIBRARY_PATH"] = ""
-    #     clean_env["DYLD_LIBRARY_PATH"] = ""
-
-    #     clean_env["nnUNet_results"] = os.path.abspath(self.extracted_model_path)
-    #     clean_env["nnUNet_preprocessed"] = os.path.abspath(self.extracted_model_path)
-    #     clean_env["nnUNet_raw"] = os.path.abspath(self.extracted_model_path)
-
-    #     # Lancer
-    #     print(f"📣 Lancement réel (python venv) : {python_exec} {' '.join(args)}")
-    #     subprocess.run([python_exec] + args, env=clean_env, check=True)
-    
-
-    # def get_torch_device(self, python_exec):
-
-    #     check_device_code = """
-    #         import torch
-    #         if torch.cuda.is_available():
-    #             print("cuda")
-    #         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-    #             print("mps")
-    #         else:
-    #             print("cpu")
-    #     """
-
-    #     result = subprocess.run(
-    #         [python_exec, "-c", check_device_code],
-    #         stdout=subprocess.PIPE,
-    #         stderr=subprocess.PIPE,
-    #         text=True,
-    #     )
-    #     return result.stdout.strip()
-
 
     def on_segmentation_error(self, error_message):
         """
