@@ -77,10 +77,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         self.extracted_model_path = None
         self.customPythonPath = None
-
         self.prediction = None
-
         self.modified_dataset_json = None
+        self.convertedInputToDelete = None  # Pour supprimer le fichier converti après la segmentation
 
 
     def setup(self):
@@ -98,6 +97,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         uiWidget = slicer.util.loadUI(uiFilePath)
         self.layout.addWidget(uiWidget)
         self.layout.setContentsMargins(0, 0, 0, 0)
+
+        
 
 
         # Récupération des widgets
@@ -174,9 +175,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
 
     def handleImageSelection(self):
-        """
-        Gère la sélection d'un fichier image, convertit si nécessaire et retourne le chemin du fichier sélectionné.
-        """
         selected = qt.QFileDialog.getOpenFileName(
             slicer.util.mainWindow(),
             "Sélectionner une image",
@@ -199,6 +197,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 slicer.util.saveNode(loadedNode, converted_nrrd_path)
                 print(f"\n✅ Conversion terminée : {converted_nrrd_path}")
 
+                # 🔁 Sauvegarder pour suppression future
+                self.convertedInputToDelete = converted_nrrd_path
+
                 return converted_nrrd_path
             except Exception as e:
                 qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur de conversion", f"Erreur lors de la conversion en .nrrd : {str(e)}")
@@ -208,11 +209,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         return selected
 
 
+
     def handleDICOMSelection(self):
-        """
-        Gère la sélection d'un dossier DICOM, charge le volume DICOM et le convertit en .nrrd.
-        Retourne le chemin du fichier converti ou None en cas d'erreur.
-        """
         dicomDir = qt.QFileDialog.getExistingDirectory(
             slicer.util.mainWindow(),
             "Sélectionner un dossier DICOM",
@@ -230,10 +228,15 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if success:
             outputPath = os.path.join(dicomDir, "converted_volume.nrrd")
             slicer.util.saveNode(volumeNode, outputPath)
+
+            # 🔁 Sauvegarder pour suppression future
+            self.convertedInputToDelete = outputPath
+
             return outputPath
         else:
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du volume DICOM.")
             return None
+
 
 
     def validateCheckboxes(self, sender):
@@ -709,6 +712,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # Suppression de l'ancienne prédiction si elle existe
         if os.path.exists(prediction_path):
             os.remove(prediction_path)
+        
+        if os.path.exists(self.convertedInputToDelete):
+            os.remove(self.convertedInputToDelete)
 
 
     def get_segmentation_name(self):
@@ -727,7 +733,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             return "Segmentation"
 
         return "_".join(structures)
-
 
 
     def edit_json_for_prediction(self, input_image_path):
