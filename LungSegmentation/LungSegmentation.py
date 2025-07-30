@@ -79,7 +79,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.customPythonPath = None
         self.prediction = None
         self.modified_dataset_json = None
-        self.convertedInputToDelete = None  # Pour supprimer le fichier converti après la segmentation
+
+        self.convertedInputToDelete = None  # pour suppression future
+        self.originalInputPath = None  # pour affichage dans le champ de texte
+        self.convertedInputPath = None  # fichier .nrrd converti à utiliser en interne
+
 
 
     def setup(self):
@@ -97,9 +101,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         uiWidget = slicer.util.loadUI(uiFilePath)
         self.layout.addWidget(uiWidget)
         self.layout.setContentsMargins(0, 0, 0, 0)
-
-        
-
 
         # Récupération des widgets
         self.checkBoxInvivoParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoParenchyma")
@@ -156,7 +157,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
     def selectInputFile(self):
         """
         Affiche une boîte de dialogue pour sélectionner un fichier image ou un dossier DICOM.
-        Gère les conversions nécessaires vers le format .nrrd.
+        Ne fait pas de conversion ici, juste stocke le chemin original.
         """
         optionsBox = qt.QMessageBox(slicer.util.mainWindow())
         optionsBox.setWindowTitle("Choisir une source d'image")
@@ -168,13 +169,21 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         clicked = optionsBox.clickedButton()
         if clicked == imageButton:
-            return self.handleImageSelection()
+            path = self.handleImageSelection()
         elif clicked == dicomButton:
-            return self.handleDICOMSelection()
-        return None
+            path = self.handleDICOMSelection()
+        else:
+            return
+
+        if path:
+            self.originalInputPath = path
+            self.lineEditInputPath.setText(path)
 
 
     def handleImageSelection(self):
+        """
+        Sélectionne un fichier image, le charge dans le viewer, sans conversion immédiate.
+        """
         selected = qt.QFileDialog.getOpenFileName(
             slicer.util.mainWindow(),
             "Sélectionner une image",
@@ -184,33 +193,19 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if not selected:
             return None
 
-        ext = os.path.splitext(selected)[1].lower()
-        if ext in [".nii", ".nii.gz", ".mha"]:
-            try:
-                print(f"\n🔄 Conversion de {selected} en .nrrd...")
-                loadedNode = slicer.util.loadVolume(selected, returnNode=True)[1]
-                if not loadedNode:
-                    raise RuntimeError("Le fichier n'a pas pu être chargé.")
+        # Charger le volume dans le viewer, peu importe l’extension
+        success, loadedNode = slicer.util.loadVolume(selected, returnNode=True)
+        if not success:
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Impossible de charger le fichier sélectionné.")
+            return None
 
-                extension_dir = os.path.dirname(os.path.abspath(__file__))
-                converted_nrrd_path = os.path.join(extension_dir, "converted_input.nrrd")
-                slicer.util.saveNode(loadedNode, converted_nrrd_path)
-                print(f"\n✅ Conversion terminée : {converted_nrrd_path}")
-
-                # 🔁 Sauvegarder pour suppression future
-                self.convertedInputToDelete = converted_nrrd_path
-
-                return converted_nrrd_path
-            except Exception as e:
-                qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur de conversion", f"Erreur lors de la conversion en .nrrd : {str(e)}")
-                return None
-        else:
-            slicer.util.loadVolume(selected)
         return selected
 
 
-
     def handleDICOMSelection(self):
+        """
+        Sélectionne un dossier DICOM, charge le premier fichier dans le viewer sans conversion immédiate.
+        """
         dicomDir = qt.QFileDialog.getExistingDirectory(
             slicer.util.mainWindow(),
             "Sélectionner un dossier DICOM",
@@ -224,18 +219,55 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Aucun fichier DICOM trouvé.")
             return None
 
-        success, volumeNode = slicer.util.loadVolume(dcmFiles[0], returnNode=True)
-        if success:
-            outputPath = os.path.join(dicomDir, "converted_volume.nrrd")
-            slicer.util.saveNode(volumeNode, outputPath)
-
-            # 🔁 Sauvegarder pour suppression future
-            self.convertedInputToDelete = outputPath
-
-            return outputPath
-        else:
-            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du volume DICOM.")
+        success, _ = slicer.util.loadVolume(dcmFiles[0], returnNode=True)
+        if not success:
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du fichier DICOM.")
             return None
+
+        return dicomDir
+
+    
+    def prepareInputForSegmentation(self, inputPath):
+        """
+        Vérifie et prépare le chemin d'entrée pour la segmentation.
+        Si besoin, convertit en .nrrd et retourne le chemin converti.
+        """
+        inputPath = inputPath.strip()
+        if not inputPath or not os.path.exists(inputPath):
+            raise RuntimeError("Chemin d'entrée invalide.")
+
+        ext = os.path.splitext(inputPath)[1].lower()
+        is_dir = os.path.isdir(inputPath)
+
+        if is_dir:
+            # Dossier DICOM
+            dcmFiles = [os.path.join(inputPath, f) for f in os.listdir(inputPath) if f.lower().endswith(".dcm")]
+            if not dcmFiles:
+                raise RuntimeError("Aucun fichier DICOM trouvé dans le dossier.")
+            success, volumeNode = slicer.util.loadVolume(dcmFiles[0], returnNode=True)
+            if not success:
+                raise RuntimeError("Erreur lors du chargement du volume DICOM.")
+            convertedPath = os.path.join(slicer.app.temporaryPath, "converted_from_dicom.nrrd")
+            slicer.util.saveNode(volumeNode, convertedPath)
+            self.convertedInputToDelete = convertedPath
+            return convertedPath
+
+        elif ext in [".mha", ".nii", ".nii.gz"]:
+            # Fichier image à convertir
+            success, volumeNode = slicer.util.loadVolume(inputPath, returnNode=True)
+            if not success:
+                raise RuntimeError("Erreur lors du chargement de l'image.")
+            convertedPath = os.path.join(slicer.app.temporaryPath, "converted_from_image.nrrd")
+            slicer.util.saveNode(volumeNode, convertedPath)
+            self.convertedInputToDelete = convertedPath
+            return convertedPath
+
+        elif ext == ".nrrd":
+            # ✅ Aucun traitement requis
+            return inputPath
+
+        else:
+            raise RuntimeError("Format non supporté. Veuillez sélectionner un fichier .nrrd, .mha, .nii, ou un dossier DICOM.")
 
 
 
@@ -442,7 +474,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         fold = str(model_info["fold"])
         model_name = model_info["model_name"]
 
-        input_path = self.lineEditInputPath.text 
+        try:
+            input_nrrd_path = self.prepareInputForSegmentation(self.lineEditInputPath.text)
+        except Exception as e:
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur d'entrée", str(e))
+            return
+
         output_path = self.lineEditOutputPath.text
 
         self.temp_dir_obj = tempfile.TemporaryDirectory()
@@ -460,11 +497,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
                 zip_ref.extractall(self.extracted_model_path)
 
-        if not os.path.isfile(input_path) or not input_path.endswith('.nrrd'):
+        if not os.path.isfile(input_nrrd_path) or not input_nrrd_path.endswith('.nrrd'):
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur fichier", "Veuillez sélectionner un fichier NRRD valide en entrée.")
             return
 
-        self.edit_json_for_prediction(input_path)
+        self.edit_json_for_prediction(input_nrrd_path)
 
         os.environ["nnUNet_results"] = os.path.abspath(self.extracted_model_path)
 
@@ -475,7 +512,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         qt.QTimer.singleShot(0, self.timer.start)
 
-        # self.launch_segmentation(input_path, output_path, dataset_id, configuration, fold)
         threading.Thread(
             target=self.run_segmentation_in_thread,
             args=(self.imagesTs_path, output_path, dataset_id, configuration, fold),
@@ -796,4 +832,3 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # Stockage pour prédiction
         self.modified_dataset_json = json_path
         self.imagesTs_path = imagesTs_path 
-
