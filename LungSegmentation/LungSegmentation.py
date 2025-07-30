@@ -679,7 +679,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
         slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
 
-        # 🔁 Lire les noms des labels depuis dataset.json
+        # Lire les noms des labels depuis dataset.json
         if not hasattr(self, "modified_dataset_json") or not os.path.exists(self.modified_dataset_json):
             raise RuntimeError("Le fichier dataset.json modifié n'a pas été trouvé.")
 
@@ -690,7 +690,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         raw_label_map = dataset.get("labels", {})
         label_map = {int(v): k for k, v in raw_label_map.items() if int(v) > 0}
 
-        # 🔢 Renommer les segments
+        # Renommer les segments
         segment_ids = vtk.vtkStringArray()
         segmentationNode.GetSegmentation().GetSegmentIDs(segment_ids)
 
@@ -698,11 +698,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             segment_id = segment_ids.GetValue(i)
             segment = segmentationNode.GetSegmentation().GetSegment(segment_id)
 
-            label_index = i + 1  # Les segments sont dans l’ordre croissant (1, 2, 3, ...)
+            label_index = i + 1 
             name = label_map.get(label_index, f"Classe_{label_index}")
             segment.SetName(name)
 
-        # 💾 Sauvegarder la segmentation
+        # Sauvegarder la segmentation
         segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
         slicer.util.saveNode(segmentationNode, segmentation_path)
 
