@@ -667,6 +667,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
     def convert_prediction_to_segmentation(self, prediction_path, output_path, labelmap_name="segmentation", segmentation_name="segmentation"):
         """
         Convertit une prédiction nnUNet en segmentation Slicer et renomme les segments selon les noms dans dataset.json.
+        
+        Args:
+            prediction_path (str): Chemin du fichier de prédiction (.nrrd).
+            output_path (str): Chemin du dossier de sortie pour la segmentation.
+            labelmap_name (str): Nom du labelmap à créer.
+            segmentation_name (str): Nom de la segmentation à créer.
         """
 
         # Charger la prédiction comme labelmap
@@ -718,6 +724,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
 
     def get_segmentation_name(self):
+        """
+        Retourne le nom de la segmentation basé sur les cases à cocher sélectionnées.
+        Si aucune case n'est cochée, retourne "Segmentation".
+        Returns:
+            str: Nom de la segmentation.
+        """
         structures = []
 
         if self.checkBoxInvivoParenchyma.isChecked() or self.checkBoxExvivoParenchyma.isChecked():
