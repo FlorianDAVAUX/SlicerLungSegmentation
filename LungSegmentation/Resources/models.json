@@ -64,7 +64,7 @@
       "model_id": "001",
       "configuration": "3d_fullres",
       "num_classes": 1,
-      "fold": 3
+      "fold": 4
     }
   }
 }
