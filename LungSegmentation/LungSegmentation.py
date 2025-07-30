@@ -2,6 +2,7 @@ import os
 import re
 import qt
 import sys
+import vtk
 import slicer
 import platform
 import subprocess
@@ -60,6 +61,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         """
         ScriptedLoadableModuleWidget.__init__(self, parent)
 
+        self.temp_dir_obj = None # Temporaire pour stocker les fichiers
+
         self.timer = qt.QTimer()
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.updateProgressBar)
@@ -67,8 +70,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.progressValue = 0
         self.progressDuration = 6 * 60  
         self.elapsedSeconds = 0
-
-        self.tempConvertedPath = None  # Pour stocker le chemin du fichier temporaire converti
 
         self.signals = SegmentationSignals()
         self.signals.finished.connect(self.on_segmentation_finished)
@@ -78,6 +79,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.customPythonPath = None
 
         self.prediction = None
+
+        self.modified_dataset_json = None
 
 
     def setup(self):
@@ -196,14 +199,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 slicer.util.saveNode(loadedNode, converted_nrrd_path)
                 print(f"\n✅ Conversion terminée : {converted_nrrd_path}")
 
-                self.tempConvertedPath = converted_nrrd_path  # ← stocké pour suppression plus tard
                 return converted_nrrd_path
             except Exception as e:
                 qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur de conversion", f"Erreur lors de la conversion en .nrrd : {str(e)}")
                 return None
         else:
             slicer.util.loadVolume(selected)
-        self.tempConvertedPath = None
         return selected
 
 
@@ -441,7 +442,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         input_path = self.lineEditInputPath.text 
         output_path = self.lineEditOutputPath.text
 
-        temp_path = slicer.app.temporaryPath if slicer.app.temporaryPath else tempfile.gettempdir()
+        self.temp_dir_obj = tempfile.TemporaryDirectory()
+        temp_path = self.temp_dir_obj.name
+
         model_zip_path = os.path.join(temp_path, model_name + ".zip")
         self.extracted_model_path = os.path.join(temp_path, model_name)
 
@@ -488,8 +491,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             configuration (str): Configuration du modèle à utiliser pour la segmentation.
             fold (str): Numéro de fold à utiliser pour la segmentation.
         """
-        # import torch 
-        # device = "cuda" if torch.cuda.is_available() else "cpu"
         
         command = [
             "nnUNetv2_predict",
@@ -613,15 +614,20 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if success:
             self.load_prediction(self.lineEditOutputPath.text)
             slicer.util.infoDisplay("✅ Segmentation terminée avec succès.")
+                
+        # Après avoir copié ou converti la prédiction finale
+        self.clean_auxiliary_files(self.lineEditInputPath.text)   
+        self.clean_auxiliary_files(self.lineEditOutputPath.text)
 
-        if self.tempConvertedPath:
-            if os.path.exists(self.tempConvertedPath):
+    
+    def clean_auxiliary_files(self, path):
+        for filename in ["dataset.json", "plans.json", "predict_from_raw_data_args.json"]:
+            file_path = os.path.join(path, filename)
+            if os.path.exists(file_path):
                 try:
-                    os.remove(self.tempConvertedPath)
-                    print(f"🗑️ Fichier temporaire supprimé : {self.tempConvertedPath}")
+                    os.remove(file_path)
                 except Exception as e:
-                    print(f"⚠️ Erreur lors de la suppression : {e}")
-            self.tempConvertedPath = None
+                    print(f"⚠️ Impossible de supprimer {filename} : {e}")
 
 
     def updateProgressBar(self):
@@ -651,28 +657,77 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             qt.QMessageBox.warning(slicer.util.mainWindow(), "Erreur", "Aucune prédiction trouvée à charger.")
             return
         else:
-            self.convert_prediction_to_segmentation(prediction_file, output_path)
+            seg_name = self.get_segmentation_name()
+            self.convert_prediction_to_segmentation(prediction_file, output_path, labelmap_name=seg_name, segmentation_name=seg_name)
 
 
     def convert_prediction_to_segmentation(self, prediction_path, output_path, labelmap_name="segmentation", segmentation_name="segmentation"):
         """
-        Convertit une prédiction nnUNet en segmentation Slicer.
+        Convertit une prédiction nnUNet en segmentation Slicer et renomme les segments selon les noms dans dataset.json.
         """
 
+        # Charger la prédiction comme labelmap
         [success, labelmapNode] = slicer.util.loadLabelVolume(prediction_path, returnNode=True)
         if not success:
             raise RuntimeError(f"Échec du chargement de la prédiction : {prediction_path}")
         labelmapNode.SetName(labelmap_name)
 
+        # Créer la segmentation node
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
         slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
 
-        segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
+        # 🔁 Lire les noms des labels depuis dataset.json
+        if not hasattr(self, "modified_dataset_json") or not os.path.exists(self.modified_dataset_json):
+            raise RuntimeError("Le fichier dataset.json modifié n'a pas été trouvé.")
 
-        # Sauvegarder la segmentation (par défaut en .nrrd)
+        with open(self.modified_dataset_json, 'r') as f:
+            dataset = json.load(f)
+
+        # labels = { "lobe_inf_d": 1, ... } → inverse pour avoir {1: "lobe_inf_d"}
+        raw_label_map = dataset.get("labels", {})
+        label_map = {int(v): k for k, v in raw_label_map.items() if int(v) > 0}
+
+        # 🔢 Renommer les segments
+        segment_ids = vtk.vtkStringArray()
+        segmentationNode.GetSegmentation().GetSegmentIDs(segment_ids)
+
+        for i in range(segment_ids.GetNumberOfValues()):
+            segment_id = segment_ids.GetValue(i)
+            segment = segmentationNode.GetSegmentation().GetSegment(segment_id)
+
+            label_index = i + 1  # Les segments sont dans l’ordre croissant (1, 2, 3, ...)
+            name = label_map.get(label_index, f"Classe_{label_index}")
+            segment.SetName(name)
+
+        # 💾 Sauvegarder la segmentation
+        segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
         slicer.util.saveNode(segmentationNode, segmentation_path)
 
+        # Nettoyage
         slicer.mrmlScene.RemoveNode(labelmapNode)
+
+        # Suppression de l'ancienne prédiction si elle existe
+        if os.path.exists(prediction_path):
+            os.remove(prediction_path)
+
+
+    def get_segmentation_name(self):
+        structures = []
+
+        if self.checkBoxInvivoParenchyma.isChecked() or self.checkBoxExvivoParenchyma.isChecked():
+            structures.append("parenchyma")
+        if self.checkBoxInvivoAirways.isChecked() or self.checkBoxExvivoAirways.isChecked():
+            structures.append("airways")
+        if self.checkBoxInvivoVascularTree.isChecked():
+            structures.append("vascular_tree")
+        if self.checkBoxInvivoLobes.isChecked():
+            structures.append("lobes")
+
+        if not structures:
+            return "Segmentation"
+
+        return "_".join(structures)
+
 
 
     def edit_json_for_prediction(self, input_image_path):
@@ -724,3 +779,4 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # Stockage pour prédiction
         self.modified_dataset_json = json_path
         self.imagesTs_path = imagesTs_path 
+
