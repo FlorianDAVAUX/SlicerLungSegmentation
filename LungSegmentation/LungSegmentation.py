@@ -656,7 +656,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         required_versions = {
             "numpy": "1.26.4",
             "nnunetv2": None,
-            "nnUNet_package": "0.1.6"
+            "nnUNet_package": "0.1.9"
         }
 
         to_install = []
