@@ -21,41 +21,6 @@ import importlib.util
 from slicer.ScriptedLoadableModule import *
 from qt import QTimer, QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
 
-import multiprocessing.util
-
-# Patch pour éviter l'erreur PythonQtStdInRedirect dans Slicer
-try:
-    multiprocessing.util._close_stdin = lambda: None
-except Exception as e:
-    print(f"⚠️ Impossible de patcher _close_stdin : {e}")
-
-
-class SegmentationWorker(QObject):
-
-    def __init__(self, mode, model_name, input_path, output_path, models_dir):
-        super().__init__()
-        self.mode = mode
-        self.model_name = model_name
-        self.input_path = input_path
-        self.output_path = output_path
-        self.models_dir = models_dir
-
-    def run(self):
-        try:
-            from nnUNet_package.predict import run_nnunet_prediction
-
-            run_nnunet_prediction(
-                mode=self.mode,
-                structure=self.model_name,
-                input_path=self.input_path,
-                output_dir=self.output_path,
-                models_dir=self.models_dir,
-                name="prediction"
-            )
-            self.finished.emit(True)
-        except Exception as e:
-            self.error.emit(str(e))
-
 
 ###################################################### Objet pour les signaux permettant de savoir si la segmentation est terminée ou s'il y a une erreur ######################################################
 
@@ -113,15 +78,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.signals.finished.connect(self.on_segmentation_finished)
         self.signals.error.connect(self.on_segmentation_error)
 
-        self.extracted_model_path = None
-        self.customPythonPath = None
-        self.prediction = None
-        self.modified_dataset_json = None
+        self.models_dir = None
+        self.structure_to_segment = None
 
         self.convertedInputToDelete = None  # pour suppression future
         self.originalInputPath = None  # pour affichage dans le champ de texte
-        self.convertedInputPath = None  # fichier .nrrd converti à utiliser en interne
-
 
 
     def setup(self):
@@ -214,8 +175,23 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             return
 
         if path:
-            self.originalInputPath = path
+            # self.originalInputPath = path
             self.lineEditInputPath.setText(path)
+
+
+    def safeLoadVolume(self, path):
+        """
+        Charge un volume de manière compatible avec les versions récentes et anciennes de Slicer.
+        Retourne le node chargé ou None en cas d'échec.
+        """
+        try:
+            # Nouvelle API (Slicer 5.6+)
+            node = slicer.util.loadVolume(path)
+            return node
+        except TypeError:
+            # Ancienne API (avant Slicer 5.6)
+            success, node = slicer.util.loadVolume(path, returnNode=True)
+            return node if success else None
 
 
     def handleImageSelection(self):
@@ -231,9 +207,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if not selected:
             return None
 
-        # Charger le volume dans le viewer, peu importe l’extension
-        success, loadedNode = slicer.util.loadVolume(selected, returnNode=True)
-        if not success:
+        loadedNode = self.safeLoadVolume(selected)
+        if not loadedNode:
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Impossible de charger le fichier sélectionné.")
             return None
 
@@ -242,7 +217,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def handleDICOMSelection(self):
         """
-        Sélectionne un dossier DICOM, charge le premier fichier dans le viewer sans conversion immédiate.
+        Sélectionne un dossier DICOM, charge le premier fichier dans le viewer, sans conversion immédiate.
         """
         dicomDir = qt.QFileDialog.getExistingDirectory(
             slicer.util.mainWindow(),
@@ -257,12 +232,13 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Aucun fichier DICOM trouvé.")
             return None
 
-        success, _ = slicer.util.loadVolume(dcmFiles[0], returnNode=True)
-        if not success:
+        node = self.safeLoadVolume(dcmFiles[0])
+        if not node:
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du fichier DICOM.")
             return None
 
         return dicomDir
+
 
     
     def prepareInputForSegmentation(self, inputPath):
@@ -498,16 +474,10 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             else:
                 qt.QMessageBox.warning(slicer.util.mainWindow(), "Modèle indisponible", "Seule la combinaison Parenchyme + Airways est supportée en Exvivo.")
                 return
-
-        try:
-            model_info = config[mode][selected_key]
-        except KeyError:
-            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur de configuration", f"Aucune configuration trouvée pour {mode} > {selected_key}")
-            return
         
         print("\n📣 Lancement de la segmentation...")
 
-        model_name = model_info["model_name"]
+        self.structure_to_segment = selected_key
 
         try:
             input_nrrd_path = self.prepareInputForSegmentation(self.lineEditInputPath.text)
@@ -522,7 +492,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             return
 
         extension_dir = os.path.dirname(__file__)
-        models_dir = os.path.join(extension_dir, "models")
+        self.models_dir = os.path.join(extension_dir, "models")
 
         self.progressBar.setVisible(True)
         self.progressBar.setValue(0)
@@ -531,40 +501,28 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         qt.QTimer.singleShot(0, self.timer.start)
 
-        segmentation_thread = threading.Thread(
-            target=self.run_prediction_in_subprocess,
-            args=(mode, model_name, input_nrrd_path, output_path, models_dir)
-        )
-        segmentation_thread.start()
+        self.start_segmentation(mode, input_nrrd_path, output_path)
+    
+    def start_segmentation(self, mode, input_path, output_path):
+        def worker():
+            try:
+                from pathlib import Path
+                runner_path = Path(__file__).parent/"scripts"/"nnunet_runner.py"
+                cmd = [
+                    sys.executable, str(runner_path),
+                    "--mode", mode,
+                    "--structure", self.structure_to_segment,
+                    "--input", input_path,
+                    "--output", output_path,
+                    "--models_dir", self.models_dir,
+                    "--name", "prediction"
+                ]
+                subprocess.run(cmd, check=True)
+                self.signals.finished.emit(True)
+            except subprocess.CalledProcessError as e:
+                self.signals.error.emit(str(e))
 
-        self.start_segmentation(mode, model_name, input_nrrd_path, output_path, models_dir)
-
-
-    def run_prediction_in_subprocess(self, mode, model_name, input_path, output_path, models_dir):
-        os.environ.update({
-            "nnUNet_n_proc_DA": "1",
-            "nnUNet_compile": "0",
-            "OMP_NUM_THREADS": "1",
-            "MKL_NUM_THREADS": "1",
-            "NUMEXPR_MAX_THREADS": "1",
-            "nnUNet_n_proc_per_patient": "1"
-        })
-
-        nnunet_code = textwrap.dedent(f"""
-            from nnUNet_package.predict import run_nnunet_prediction
-            run_nnunet_prediction(
-                mode="{mode}",
-                structure="{model_name}",
-                input_path="{input_path}",
-                output_dir="{output_path}",
-                models_dir="{models_dir}",
-                name="prediction"
-            )
-        """)
-
-        cmd = [sys.executable, "-c", nnunet_code]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print("✅ Segmentation terminée (processus silencieux).")
+        threading.Thread(target=worker, daemon=True).start()
 
 
     def on_segmentation_error(self, error_message):
@@ -595,10 +553,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if success:
             self.load_prediction(self.lineEditOutputPath.text)
             slicer.util.infoDisplay("✅ Segmentation terminée avec succès.")
-                
-        # Après avoir copié ou converti la prédiction finale
-        self.clean_auxiliary_files(self.lineEditInputPath.text)   
-        self.clean_auxiliary_files(self.lineEditOutputPath.text)
 
 
     def updateProgressBar(self):
@@ -622,14 +576,13 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Args:
             output_path (str): Chemin du dossier de sortie où la prédiction est enregistrée.
         """
-        prediction_file = os.path.join(output_path, "001.nrrd")
-
-        if not prediction_file:
+        prediction_path = os.path.join(output_path, "001.nrrd")
+        if not os.path.exists(prediction_path):
             qt.QMessageBox.warning(slicer.util.mainWindow(), "Erreur", "Aucune prédiction trouvée à charger.")
             return
         else:
             seg_name = self.get_segmentation_name()
-            self.convert_prediction_to_segmentation(prediction_file, output_path, labelmap_name=seg_name, segmentation_name=seg_name)
+            self.convert_prediction_to_segmentation(prediction_path, output_path, labelmap_name=seg_name, segmentation_name=seg_name)
 
 
     def convert_prediction_to_segmentation(self, prediction_path, output_path, labelmap_name="segmentation", segmentation_name="segmentation"):
@@ -653,11 +606,13 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
         slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
 
-        # Lire les noms des labels depuis dataset.json
-        if not hasattr(self, "modified_dataset_json") or not os.path.exists(self.modified_dataset_json):
-            raise RuntimeError("Le fichier dataset.json modifié n'a pas été trouvé.")
+        for root, _, files in os.walk(os.path.join(self.models_dir, self.structure_to_segment)):
+            if "dataset.json" in files:
+                dataset_json_path = os.path.join(root, "dataset.json")
+        
+        print(f"📄 Chargement des labels depuis : {dataset_json_path}")
 
-        with open(self.modified_dataset_json, 'r') as f:
+        with open(dataset_json_path, 'r') as f:
             dataset = json.load(f)
 
         # labels = { "lobe_inf_d": 1, ... } → inverse pour avoir {1: "lobe_inf_d"}
@@ -687,32 +642,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if os.path.exists(prediction_path):
             os.remove(prediction_path)
         
-        if os.path.exists(self.convertedInputToDelete):
+        if self.convertedInputToDelete and os.path.exists(self.convertedInputToDelete):
             os.remove(self.convertedInputToDelete)
-
-
-    def get_segmentation_name(self):
-        """
-        Retourne le nom de la segmentation basé sur les cases à cocher sélectionnées.
-        Si aucune case n'est cochée, retourne "Segmentation".
-        Returns:
-            str: Nom de la segmentation.
-        """
-        structures = []
-
-        if self.checkBoxInvivoParenchyma.isChecked() or self.checkBoxExvivoParenchyma.isChecked():
-            structures.append("parenchyma")
-        if self.checkBoxInvivoAirways.isChecked() or self.checkBoxExvivoAirways.isChecked():
-            structures.append("airways")
-        if self.checkBoxInvivoVascularTree.isChecked():
-            structures.append("vascular_tree")
-        if self.checkBoxInvivoLobes.isChecked():
-            structures.append("lobes")
-
-        if not structures:
-            return "Segmentation"
-
-        return "_".join(structures)
 
 
     def install_dependencies_if_needed(self):
@@ -724,8 +655,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         required_versions = {
             "numpy": "1.26.4",
-            "blosc2": "2.5.1",
-            "nnunetv2": "0.1.5",
+            "nnunetv2": None,
+            "nnUNet_package": "0.1.6"
         }
 
         to_install = []
@@ -742,17 +673,16 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             print("❌ numpy non installé")
             to_install.append(f"numpy=={required_versions['numpy']}")
 
-        # Check blosc2
         try:
-            import blosc2
-            if blosc2.__version__ != required_versions["blosc2"]:
-                print(f"❌ blosc2 version {blosc2.__version__} trouvée, {required_versions['blosc2']} requise.")
-                to_install.append(f"blosc2=={required_versions['blosc2']}")
+            import nnUNet_package
+            if nnUNet_package.__version__ != required_versions["nnUNet_package"]:
+                print(f"❌ nnUNet_package version {nnUNet_package.__version__} trouvée, {required_versions['nnUNet_package']} requise.")
+                to_install.append(f"nnUNet_package=={required_versions['nnUNet_package']}")
             else:
-                print(f"✅ blosc2 {blosc2.__version__} OK")
+                print(f"✅ nnUNet_package {nnUNet_package.__version__} OK")
         except ImportError:
-            print("❌ blosc2 non installé")
-            to_install.append(f"blosc2=={required_versions['blosc2']}")
+            print("❌ nnUNet_package non installé")
+            to_install.append(f"nnUNet_package=={required_versions['nnUNet_package']}")
 
         # Check nnunetv2
         try:
@@ -777,3 +707,27 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             sys.exit(0)
         else:
             print("✅ Toutes les dépendances sont à la bonne version.")
+
+
+    def get_segmentation_name(self):
+        """
+        Retourne le nom de la segmentation basé sur les cases à cocher sélectionnées.
+        Si aucune case n'est cochée, retourne "Segmentation".
+        Returns:
+            str: Nom de la segmentation.
+        """
+        structures = []
+
+        if self.checkBoxInvivoParenchyma.isChecked() or self.checkBoxExvivoParenchyma.isChecked():
+            structures.append("parenchyma")
+        if self.checkBoxInvivoAirways.isChecked() or self.checkBoxExvivoAirways.isChecked():
+            structures.append("airways")
+        if self.checkBoxInvivoVascularTree.isChecked():
+            structures.append("vascular_tree")
+        if self.checkBoxInvivoLobes.isChecked():
+            structures.append("lobes")
+
+        if not structures:
+            return "Segmentation"
+
+        return "_".join(structures)
