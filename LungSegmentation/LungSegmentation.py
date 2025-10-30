@@ -475,7 +475,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 qt.QMessageBox.warning(slicer.util.mainWindow(), "Modèle indisponible", "Seule la combinaison Parenchyme + Airways est supportée en Exvivo.")
                 return
         
-        print("\n📣 Lancement de la segmentation...")
+        print("\n Lancement de la segmentation...")
 
         self.structure_to_segment = selected_key
 
@@ -654,7 +654,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         required_versions = {
             "numpy": "1.26.4",
             "nnunetv2": None,
-            "nnUNet_package": "0.1.9"
+            "nnUNet_package": "0.1.10"
         }
 
         to_install = []
@@ -663,23 +663,23 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         try:
             import numpy
             if numpy.__version__ != required_versions["numpy"]:
-                print(f"❌ numpy version {numpy.__version__} trouvée, {required_versions['numpy']} requise.")
+                print(f"numpy version {numpy.__version__} trouvée, {required_versions['numpy']} requise.")
                 to_install.append(f"numpy=={required_versions['numpy']}")
             else:
-                print(f"✅ numpy {numpy.__version__} OK")
+                print(f"numpy {numpy.__version__} OK")
         except ImportError:
-            print("❌ numpy non installé")
+            print("numpy non installé")
             to_install.append(f"numpy=={required_versions['numpy']}")
 
         try:
             import nnUNet_package
             if nnUNet_package.__version__ != required_versions["nnUNet_package"]:
-                print(f"❌ nnUNet_package version {nnUNet_package.__version__} trouvée, {required_versions['nnUNet_package']} requise.")
+                print(f"nnUNet_package version {nnUNet_package.__version__} trouvée, {required_versions['nnUNet_package']} requise.")
                 to_install.append(f"nnUNet_package=={required_versions['nnUNet_package']}")
             else:
-                print(f"✅ nnUNet_package {nnUNet_package.__version__} OK")
+                print(f"nnUNet_package {nnUNet_package.__version__} OK")
         except ImportError:
-            print("❌ nnUNet_package non installé")
+            print("nnUNet_package non installé")
             to_install.append(f"nnUNet_package=={required_versions['nnUNet_package']}")
 
         # Check nnunetv2
@@ -687,9 +687,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             nnunetv2_spec = importlib.util.find_spec("nnunetv2")
             if nnunetv2_spec is None:
                 raise ImportError
-            print("✅ nnunetv2 OK")
+            print("nnunetv2 OK")
         except ImportError:
-            print("❌ nnunetv2 non installé")
+            print("nnunetv2 non installé")
             to_install.append("nnunetv2")
 
         if to_install:
@@ -704,7 +704,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             slicer.util.mainWindow().close()
             sys.exit(0)
         else:
-            print("✅ Toutes les dépendances sont à la bonne version.")
+            print("Toutes les dépendances sont à la bonne version.")
 
 
     def get_segmentation_name(self):
