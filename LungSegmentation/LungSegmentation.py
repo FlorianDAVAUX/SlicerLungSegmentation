@@ -609,8 +609,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         for root, _, files in os.walk(os.path.join(self.models_dir, self.structure_to_segment)):
             if "dataset.json" in files:
                 dataset_json_path = os.path.join(root, "dataset.json")
-        
-        print(f"📄 Chargement des labels depuis : {dataset_json_path}")
 
         with open(dataset_json_path, 'r') as f:
             dataset = json.load(f)
