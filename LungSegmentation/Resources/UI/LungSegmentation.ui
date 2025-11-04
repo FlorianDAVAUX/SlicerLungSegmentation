@@ -124,6 +124,22 @@
     </widget>
    </item>
    <item>
+    <widget class="ctkCollapsibleButton" name="partsCollapsibleButton" native="true">
+     <property name="text" stdset="0">
+      <string>Axial</string>
+     </property>
+     <layout class="QFormLayout" name="formLayoutParts">
+      <item row="0" column="0">
+       <widget class="QCheckBox" name="checkBoxAxialAll">
+        <property name="text">
+         <string>All</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QProgressBar" name="progressBar">
      <property name="value">
       <number>24</number>
