@@ -19,6 +19,7 @@ import tempfile
 import threading
 import importlib.util
 from slicer.ScriptedLoadableModule import *
+import importlib.resources as resources
 from qt import QTimer, QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
 
 
@@ -78,11 +79,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.signals.finished.connect(self.on_segmentation_finished)
         self.signals.error.connect(self.on_segmentation_error)
 
-        self.models_dir = None
-        self.structure_to_segment = None
+        self.models_dir = None              # Dossier contenant les modèles téléchargés
+        self.structure_to_segment = None    # Structure à segmenter
+        self.tmp_file = None                # Fichier temporaire pour stocker le chemin du dataset json 
 
-        self.convertedInputToDelete = None  # pour suppression future
-        self.originalInputPath = None  # pour affichage dans le champ de texte
+        self.convertedInputToDelete = None  # Pour suppression future
+        self.originalInputPath = None       # Pour affichage dans le champ de texte
 
 
     def setup(self):
@@ -109,6 +111,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         self.checkBoxExvivoParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxExvivoParenchyma")
         self.checkBoxExvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxExvivoAirways")
+
+        self.checkBoxAxialAll = uiWidget.findChild(qt.QCheckBox, "checkBoxAxialAll")
 
         self.browseInputButton = uiWidget.findChild(qt.QPushButton, "browseInputButton")
         self.lineEditInputPath = uiWidget.findChild(qt.QLineEdit, "inputLineEdit")
@@ -307,6 +311,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             "airways": self.checkBoxExvivoAirways
         }
 
+
         # État des groupes
         invivo_checked = any(cb.checked for cb in invivo_checkboxes.values())
         exvivo_checked = any(cb.checked for cb in exvivo_checkboxes.values())
@@ -414,26 +419,20 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         msgBox.exec_()
 
         return False
-
-
-    def loadConfig(self):
-        """
-        Charge la configuration des modèles depuis le fichier JSON.
-        """
-        config_path = os.path.join(os.path.dirname(__file__), 'Resources', 'models.json')
-        with open(config_path, 'r') as f:
-            return json.load(f)
     
 
     def onSegmentationButtonClicked(self):
-        config = self.loadConfig()
-
-        mode = "Invivo" if (
+        if (
             self.checkBoxInvivoParenchyma.isChecked() or
             self.checkBoxInvivoAirways.isChecked() or
             self.checkBoxInvivoVascularTree.isChecked() or
             self.checkBoxInvivoLobes.isChecked()
-        ) else "Exvivo"
+        ):
+            mode = "Invivo"
+        elif self.checkBoxAxialAll.isChecked():
+            mode = "Axial"
+        else:
+            mode = "Exvivo"
 
         if mode == "Invivo":
             if not self.check_combination_and_warn_invivo(
@@ -443,7 +442,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 self.checkBoxInvivoLobes.isChecked()
             ):
                 return
-        else:
+        elif mode == "Exvivo":
             if not self.check_combination_and_warn_exvivo(
                 self.checkBoxExvivoParenchyma.isChecked(),
                 self.checkBoxExvivoAirways.isChecked()
@@ -466,7 +465,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             else:
                 qt.QMessageBox.warning(slicer.util.mainWindow(), "Aucun modèle sélectionné", "Veuillez sélectionner au moins une structure.")
                 return
-        else:
+        elif mode == "Exvivo":
             if self.checkBoxExvivoParenchyma.isChecked() and self.checkBoxExvivoAirways.isChecked():
                 selected_key = "ParenchymaAirways"
             elif self.checkBoxExvivoAirways.isChecked():
@@ -474,8 +473,10 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             else:
                 qt.QMessageBox.warning(slicer.util.mainWindow(), "Modèle indisponible", "Seule la combinaison Parenchyme + Airways est supportée en Exvivo.")
                 return
+        else:
+            selected_key = "All"
         
-        print("\n Lancement de la segmentation...")
+        print("\nLancement de la segmentation...")
 
         self.structure_to_segment = selected_key
 
@@ -504,10 +505,35 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.start_segmentation(mode, input_nrrd_path, output_path)
     
     def start_segmentation(self, mode, input_path, output_path):
+        """
+        Fonction qui lance le processus de segmentation en arrière-plan.
+        
+        Elle appelle le script nnunet_runner.py avec les paramètres de la segmentation.
+        Elle attend que le processus se termine, puis emet le signal finished si tout se passe bien,
+        ou le signal error si un problème se produit.
+        
+        Args:
+            mode (str): Mode de segmentation (In vivo, Ex vivo)
+            input_path (str): Chemin vers le fichier d'entrée
+            output_path (str): Chemin vers le dossier de sortie
+        """
         def worker():
+            """
+            Fonction worker qui lance le processus de segmentation en arrière-plan.
+            
+            Elle appelle le script nnunet_runner.py avec les paramètres de la segmentation.
+            Elle attend que le processus se termine, puis emet le signal finished si tout se passe bien,
+            ou le signal error si un problème se produit.
+            """
             try:
                 from pathlib import Path
                 runner_path = Path(__file__).parent/"scripts"/"nnunet_runner.py"
+
+                # Fichier temporaire pour stocker le chemin du dataset json
+                self.tmp_file = os.path.join(tempfile.gettempdir(), "nnunet_context.json")
+                if os.path.exists(self.tmp_file):
+                    os.remove(self.tmp_file)
+
                 cmd = [
                     sys.executable, str(runner_path),
                     "--mode", mode,
@@ -515,9 +541,10 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                     "--input", input_path,
                     "--output", output_path,
                     "--models_dir", self.models_dir,
-                    "--name", "prediction"
+                    "--name", "prediction",
+                    "--tmp_file", self.tmp_file
                 ]
-                subprocess.run(cmd, check=True)
+                subprocess.run(cmd, text=True)
                 self.signals.finished.emit(True)
             except subprocess.CalledProcessError as e:
                 self.signals.error.emit(str(e))
@@ -535,7 +562,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         """
         self.timer.stop()
         self.progressBar.setVisible(False)
-        slicer.util.errorDisplay(f"❌ Erreur lors de la segmentation :\n{error_message}")
+        slicer.util.errorDisplay(f"Erreur lors de la segmentation :\n{error_message}")
 
 
     def on_segmentation_finished(self, success):
@@ -552,7 +579,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         if success:
             self.load_prediction(self.lineEditOutputPath.text)
-            slicer.util.infoDisplay("✅ Segmentation terminée avec succès.")
+            slicer.util.infoDisplay("Segmentation terminée avec succès.")
 
 
     def updateProgressBar(self):
@@ -606,11 +633,14 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
         slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
 
-        for root, _, files in os.walk(os.path.join(self.models_dir, self.structure_to_segment)):
-            if "dataset.json" in files:
-                dataset_json_path = os.path.join(root, "dataset.json")
+        
+        with open(self.tmp_file, 'r') as f:
+            data = json.load(f)
+        
+        dataset_json_path = data["dataset_json_path"]
 
-        with open(dataset_json_path, 'r') as f:
+        # Charger le dataset.json du modèle
+        with open(dataset_json_path, "r") as f:
             dataset = json.load(f)
 
         # labels = { "lobe_inf_d": 1, ... } → inverse pour avoir {1: "lobe_inf_d"}
@@ -646,61 +676,33 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def install_dependencies_if_needed(self):
         """
-        Vérifie si numpy==1.26.4, blosc2==2.5.1 et nnunetv2 sont installés.
-        Si ce n'est pas le cas, installe les bonnes versions puis ferme Slicer pour reload.
+        Vérifie si nnUNet_package est installé.
+        Si ce n'est pas le cas, installe las bonne version puis ferme Slicer pour reload.
         """
         import importlib
 
         required_versions = {
-            "numpy": "1.26.4",
-            "nnunetv2": None,
-            "nnUNet_package": "0.1.10"
+            "nnUNet_package": "0.1.19"
         }
 
-        to_install = []
-
-        # Check numpy
-        try:
-            import numpy
-            if numpy.__version__ != required_versions["numpy"]:
-                print(f"numpy version {numpy.__version__} trouvée, {required_versions['numpy']} requise.")
-                to_install.append(f"numpy=={required_versions['numpy']}")
-            else:
-                print(f"numpy {numpy.__version__} OK")
-        except ImportError:
-            print("numpy non installé")
-            to_install.append(f"numpy=={required_versions['numpy']}")
+        to_install = None
 
         try:
             import nnUNet_package
             if nnUNet_package.__version__ != required_versions["nnUNet_package"]:
                 print(f"nnUNet_package version {nnUNet_package.__version__} trouvée, {required_versions['nnUNet_package']} requise.")
-                to_install.append(f"nnUNet_package=={required_versions['nnUNet_package']}")
+                to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
             else:
                 print(f"nnUNet_package {nnUNet_package.__version__} OK")
         except ImportError:
             print("nnUNet_package non installé")
-            to_install.append(f"nnUNet_package=={required_versions['nnUNet_package']}")
-
-        # Check nnunetv2
-        try:
-            nnunetv2_spec = importlib.util.find_spec("nnunetv2")
-            if nnunetv2_spec is None:
-                raise ImportError
-            print("nnunetv2 OK")
-        except ImportError:
-            print("nnunetv2 non installé")
-            to_install.append("nnunetv2")
+            to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
 
         if to_install:
-            msg = "Les dépendances suivantes vont être installées ou mises à jour :\n" + "\n".join(to_install)
-            msg += "\n\nSlicer va se fermer automatiquement après l'installation. Veuillez le relancer."
-            qt.QMessageBox.information(
-                slicer.util.mainWindow(), "Installation des dépendances", msg
-            )
+            msg = f"Le module {to_install} va être installé."
+            msg += "\nSlicer va se fermer automatiquement après l'installation. Veuillez le relancer."
             python_exec = sys.executable
-            for pkg in to_install:
-                subprocess.check_call([python_exec, "-m", "pip", "install", "--upgrade", "--no-cache-dir", pkg])
+            subprocess.check_call([python_exec, "-m", "pip", "install", "--upgrade", "--no-cache-dir", to_install])
             slicer.util.mainWindow().close()
             sys.exit(0)
         else:
@@ -724,6 +726,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             structures.append("vascular_tree")
         if self.checkBoxInvivoLobes.isChecked():
             structures.append("lobes")
+        if self.checkBoxAxialAll.isChecked():
+            structures.append("axial")
 
         if not structures:
             return "Segmentation"
