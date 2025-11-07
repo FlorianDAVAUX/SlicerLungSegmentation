@@ -12,7 +12,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Chemin vers le fichier d'entrée")
     parser.add_argument("--output", required=True, help="Répertoire de sortie pour les résultats")
     parser.add_argument("--models_dir", required=True, help="Répertoire contenant les modèles")
-    parser.add_argument("--name", default="prediction", help="Nom de la prédiction")
+    parser.add_argument("--animal", default="rabbit", help="Nom de l'animal")
     parser.add_argument("--tmp_file", default=None, help="Fichier temporaire pour stocker le chemin du dataset json")
     args = parser.parse_args()
 
@@ -22,7 +22,7 @@ if __name__ == "__main__":
         input_path=args.input,
         output_dir=args.output,
         models_dir=args.models_dir,
-        name=args.name
+        animal=args.animal,
     )
 
     # Sauvegarde le chemin du dataset json du modèle dans le fichier temporaire
