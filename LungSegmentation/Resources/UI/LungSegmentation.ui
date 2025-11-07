@@ -6,11 +6,13 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>837</width>
+    <width>988</width>
     <height>697</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="mainVerticalLayout">
+
+   <!-- INPUT DIRECTORY -->
    <item>
     <widget class="ctkCollapsibleButton" name="inputsCollapsibleButton" native="true">
      <property name="text" stdset="0">
@@ -37,6 +39,8 @@
      </layout>
     </widget>
    </item>
+
+   <!-- OUTPUT DIRECTORY -->
    <item>
     <widget class="ctkCollapsibleButton" name="outputsCollapsibleButton" native="true">
      <property name="text" stdset="0">
@@ -63,89 +67,153 @@
      </layout>
     </widget>
    </item>
+
+   <!-- RABBIT SECTION -->
    <item>
-    <widget class="ctkCollapsibleButton" name="partsCollapsibleButton" native="true">
+    <widget class="ctkCollapsibleButton" name="rabbitCollapsibleButton" native="true">
      <property name="text" stdset="0">
-      <string>In vivo</string>
+      <string>Rabbit</string>
      </property>
-     <layout class="QFormLayout" name="formLayoutParts">
-      <item row="0" column="0">
-       <widget class="QCheckBox" name="checkBoxInvivoParenchyma">
-        <property name="text">
-         <string>Parenchyma</string>
+     <layout class="QVBoxLayout" name="layoutRabbit">
+
+      <!-- IN VIVO -->
+      <item>
+       <widget class="QGroupBox" name="groupInvivo">
+        <property name="title">
+         <string>In vivo</string>
         </property>
+        <layout class="QFormLayout" name="formLayoutInvivo">
+         <item row="0" column="0">
+          <widget class="QCheckBox" name="checkBoxRabbitInvivoParenchyma">
+           <property name="text">
+            <string>Parenchyma</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QCheckBox" name="checkBoxRabbitInvivoParenchymaAirways">
+           <property name="text">
+            <string>Parenchyma/Airways</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QCheckBox" name="checkBoxRabbitInvivoAirways">
+           <property name="text">
+            <string>Airways</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QCheckBox" name="checkBoxRabbitInvivoParenchymaAirwaysVascularTree">
+           <property name="text">
+            <string>Parenchyma/Airways/Vascular Tree</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QCheckBox" name="checkBoxRabbitInvivoVascularTree">
+           <property name="text">
+            <string>Vascular Tree</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QCheckBox" name="checkBoxRabbitInvivoLobes">
+           <property name="text">
+            <string>Lobes</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </widget>
       </item>
-      <item row="1" column="0">
-       <widget class="QCheckBox" name="checkBoxInvivoAirways">
-        <property name="text">
-         <string>Airways</string>
+
+      <!-- EX VIVO -->
+      <item>
+       <widget class="QGroupBox" name="groupExvivo">
+        <property name="title">
+         <string>Ex vivo</string>
         </property>
+        <layout class="QFormLayout" name="formLayoutExvivo">
+         <item row="0" column="0">
+          <widget class="QCheckBox" name="checkBoxRabbitExvivoParenchymaAirways">
+           <property name="text">
+            <string>Parenchyma/Airways</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QCheckBox" name="checkBoxRabbitExvivoAirways">
+           <property name="text">
+            <string>Airways</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </widget>
       </item>
-      <item row="2" column="0">
-       <widget class="QCheckBox" name="checkBoxInvivoVascularTree">
-        <property name="text">
-         <string>Vascular Tree</string>
+
+      <!-- AXIAL -->
+      <item>
+       <widget class="QGroupBox" name="groupAxial">
+        <property name="title">
+         <string>Axial</string>
         </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QCheckBox" name="checkBoxInvivoLobes">
-        <property name="text">
-         <string>Lobes</string>
-        </property>
+        <layout class="QFormLayout" name="formLayoutAxial">
+         <item row="0" column="0">
+          <widget class="QCheckBox" name="checkBoxRabbitAxialAll">
+           <property name="text">
+            <string>All</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </widget>
       </item>
      </layout>
     </widget>
    </item>
+
+   <!-- PIG SECTION -->
    <item>
-    <widget class="ctkCollapsibleButton" name="partsCollapsibleButton" native="true">
+    <widget class="ctkCollapsibleButton" name="rabbitCollapsibleButton" native="true">
      <property name="text" stdset="0">
-      <string>Ex vivo</string>
+      <string>Pig</string>
      </property>
-     <layout class="QFormLayout" name="formLayoutParts">
-      <item row="0" column="0">
-       <widget class="QCheckBox" name="checkBoxExvivoParenchyma">
-        <property name="text">
-         <string>Parenchyma</string>
+     <layout class="QVBoxLayout" name="layoutRabbit">
+
+      <!-- AXIAL -->
+      <item>
+       <widget class="QGroupBox" name="groupAxial">
+        <property name="title">
+         <string>Axial</string>
         </property>
-       </widget>
-      </item>
-      <item row="1" column="0">
-       <widget class="QCheckBox" name="checkBoxExvivoAirways">
-        <property name="text">
-         <string>Airways</string>
-        </property>
+        <layout class="QFormLayout" name="formLayoutAxial">
+         <item row="0" column="0">
+          <widget class="QCheckBox" name="checkBoxPigAxialParenchyma">
+           <property name="text">
+            <string>All</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </widget>
       </item>
      </layout>
     </widget>
    </item>
-   <item>
-    <widget class="ctkCollapsibleButton" name="partsCollapsibleButton" native="true">
-     <property name="text" stdset="0">
-      <string>Axial</string>
-     </property>
-     <layout class="QFormLayout" name="formLayoutParts">
-      <item row="0" column="0">
-       <widget class="QCheckBox" name="checkBoxAxialAll">
-        <property name="text">
-         <string>All</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
+
+   <!-- PROGRESS BAR -->
    <item>
     <widget class="QProgressBar" name="progressBar">
      <property name="value">
-      <number>24</number>
+      <number>0</number>
      </property>
     </widget>
    </item>
+
+   <!-- SEGMENT BUTTON -->
    <item>
     <widget class="QPushButton" name="pushButtonSegmentation">
      <property name="text">
@@ -153,27 +221,19 @@
      </property>
     </widget>
    </item>
+
+   <!-- SPACER -->
    <item>
     <spacer name="verticalSpacer">
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
-       <horstretch>0</horstretch>
-       <verstretch>1</verstretch>
-      </sizepolicy>
-     </property>
      <property name="orientation">
       <enum>Qt::Vertical</enum>
      </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>0</width>
-       <height>0</height>
-      </size>
-     </property>
     </spacer>
    </item>
+
   </layout>
  </widget>
+
  <customwidgets>
   <customwidget>
    <class>ctkCollapsibleButton</class>
@@ -182,6 +242,7 @@
    <container>1</container>
   </customwidget>
  </customwidgets>
+
  <resources/>
  <connections/>
 </ui>

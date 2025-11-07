@@ -82,6 +82,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.models_dir = None              # Dossier contenant les modèles téléchargés
         self.structure_to_segment = None    # Structure à segmenter
         self.tmp_file = None                # Fichier temporaire pour stocker le chemin du dataset json 
+        self.name = None                    # Nom de la prédiction future
 
         self.convertedInputToDelete = None  # Pour suppression future
         self.originalInputPath = None       # Pour affichage dans le champ de texte
@@ -103,16 +104,28 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.layout.addWidget(uiWidget)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-        # Récupération des widgets
-        self.checkBoxInvivoParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoParenchyma")
-        self.checkBoxInvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoAirways")
-        self.checkBoxInvivoVascularTree = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoVascularTree")
-        self.checkBoxInvivoLobes = uiWidget.findChild(qt.QCheckBox, "checkBoxInvivoLobes")
+        ########################################## RABBIT ##########################################
+        # IN VIVO 
+        self.checkBoxRabbitInvivoParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoParenchyma")
+        self.checkBoxRabbitInvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoAirways")
+        self.checkBoxRabbitInvivoVascularTree = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoVascularTree")
+        self.checkBoxRabbitInvivoLobes = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoLobes")
+        self.checkBoxRabbitInvivoParenchymaAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoParenchymaAirways")
+        self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoParenchymaAirwaysVascularTree")
 
-        self.checkBoxExvivoParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxExvivoParenchyma")
-        self.checkBoxExvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxExvivoAirways")
+        # EX VIVO 
+        self.checkBoxRabbitExvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitExvivoAirways")
+        self.checkBoxRabbitExvivoParenchymaAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitExvivoParenchymaAirways")
 
-        self.checkBoxAxialAll = uiWidget.findChild(qt.QCheckBox, "checkBoxAxialAll")
+        # AXIAL 
+        self.checkBoxRabbitAxialAll = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitAxialAll")
+
+        ########################################## PIG ##########################################
+
+        # AXIAL
+        self.checkBoxPigAxialParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxPigAxialParenchyma")
+
+        #########################################################################################
 
         self.browseInputButton = uiWidget.findChild(qt.QPushButton, "browseInputButton")
         self.lineEditInputPath = uiWidget.findChild(qt.QLineEdit, "inputLineEdit")
@@ -126,14 +139,44 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.progressBar.setVisible(False)
         self.progressBar.setValue(0)
 
-        # Connexions
-        for checkbox in [self.checkBoxInvivoParenchyma, self.checkBoxInvivoAirways, self.checkBoxInvivoVascularTree, self.checkBoxInvivoLobes,
-                 self.checkBoxExvivoParenchyma, self.checkBoxExvivoAirways]:
-            checkbox.toggled.connect(lambda state, cb=checkbox: self.validateCheckboxes(cb))
-
         self.browseInputButton.clicked.connect(lambda: self.openDialog("input"))
         self.browseOutputButton.clicked.connect(lambda: self.openDialog("output"))
         self.segmentationButton.clicked.connect(self.onSegmentationButtonClicked)
+
+
+    def install_dependencies_if_needed(self):
+        """
+        Vérifie si nnUNet_package est installé.
+        Si ce n'est pas le cas, installe las bonne version puis ferme Slicer pour reload.
+        """
+        import importlib
+
+        required_versions = {
+            "nnUNet_package": "0.2.1"
+        }
+
+        to_install = None
+
+        try:
+            import nnUNet_package
+            if nnUNet_package.__version__ != required_versions["nnUNet_package"]:
+                print(f"nnUNet_package version {nnUNet_package.__version__} trouvée, {required_versions['nnUNet_package']} requise.")
+                to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
+            else:
+                print(f"nnUNet_package {nnUNet_package.__version__} OK")
+        except ImportError:
+            print("nnUNet_package non installé")
+            to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
+
+        if to_install:
+            msg = f"Le module {to_install} va être installé."
+            msg += "\nSlicer va se fermer automatiquement après l'installation. Veuillez le relancer."
+            python_exec = sys.executable
+            subprocess.check_call([python_exec, "-m", "pip", "install", "--upgrade", "--no-cache-dir", to_install])
+            slicer.util.mainWindow().close()
+            sys.exit(0)
+        else:
+            print("Toutes les dépendances sont à la bonne version.")
     
     
     def openDialog(self, which):
@@ -243,7 +286,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         return dicomDir
 
-
     
     def prepareInputForSegmentation(self, inputPath):
         """
@@ -290,195 +332,74 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             raise RuntimeError("Format non supporté. Veuillez sélectionner un fichier .nrrd, .mha, .nii, ou un dossier DICOM.")
 
 
-    def validateCheckboxes(self, sender):
+    def check_mode(self):
         """
-        Valide les cases à cocher pour s'assurer qu'il n'y a pas de sélection mixte Invivo/Exvivo
-        et que les combinaisons de structures sont valides.
-        
-        Args:
-            sender: La case à cocher qui a été modifiée
-        """
-        # Grouper les cases par type
-        invivo_checkboxes = {
-            "parenchyma": self.checkBoxInvivoParenchyma,
-            "airways": self.checkBoxInvivoAirways,
-            "vascular": self.checkBoxInvivoVascularTree,
-            "lobes": self.checkBoxInvivoLobes
-        }
-
-        exvivo_checkboxes = {
-            "parenchyma": self.checkBoxExvivoParenchyma,
-            "airways": self.checkBoxExvivoAirways
-        }
-
-
-        # État des groupes
-        invivo_checked = any(cb.checked for cb in invivo_checkboxes.values())
-        exvivo_checked = any(cb.checked for cb in exvivo_checkboxes.values())
-
-        # 1. Empêcher la sélection mixte Invivo/Exvivo
-        if invivo_checked and exvivo_checked:
-            qt.QMessageBox.warning(
-                slicer.util.mainWindow(), "Conflit de sélection",
-                "Veuillez sélectionner uniquement Invivo **ou** Exvivo, pas les deux."
-            )
-            # Désactiver toutes les cases sauf celle qui vient d'être cochée
-            for cb in list(invivo_checkboxes.values()) + list(exvivo_checkboxes.values()):
-                if cb != sender:
-                    cb.setChecked(False)
-            return
-
-
-    def check_combination_and_warn_invivo(self, parenchyma_checked: bool, airways_checked: bool, vascular_checked: bool, lobes_checked: bool) -> bool:
-        """
-        Vérifie la combinaison des cases à cocher et affiche un avertissement si la combinaison est invalide.
-
-        Args:
-            parenchyma_checked: booléen indiquant si la case Parenchyme est cochée
-            airways_checked: booléen indiquant si la case Airways est cochée
-            vascular_checked: booléen indiquant si la case Vascular Tree est cochée
-            lobes_checked: booléen indiquant si la case Lobes est cochée
+        Vérifie le mode de segmentation (in vivo, ex vivo ou axial).
 
         Return:
-            True si la combinaison est valide, False sinon
+            str: "invivo", "exvivo" ou "axial"
         """
-        total_checked = parenchyma_checked + airways_checked + vascular_checked + lobes_checked
-
-        # Cas valides
-        if total_checked == 1:
-            return True
-        if lobes_checked and (parenchyma_checked or airways_checked or vascular_checked):
-            valid = False
-        elif parenchyma_checked and airways_checked and not vascular_checked and not lobes_checked:
-            valid = True
-        elif parenchyma_checked and airways_checked and vascular_checked and not lobes_checked:
-            valid = True
+        if (
+            self.checkBoxRabbitInvivoParenchyma.isChecked() or
+            self.checkBoxRabbitInvivoAirways.isChecked() or
+            self.checkBoxRabbitInvivoVascularTree.isChecked() or
+            self.checkBoxRabbitInvivoLobes.isChecked() or
+            self.checkBoxRabbitInvivoParenchymaAirways.isChecked() or
+            self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree.isChecked()
+        ):
+            return "invivo"
+        elif self.checkBoxRabbitExvivoAirways.isChecked() or self.checkBoxRabbitExvivoParenchymaAirways.isChecked():
+            return "exvivo"
         else:
-            valid = False
-
-        if valid:
-            return True
-
-        # Cas invalides → pop-up
-        msgBox = QMessageBox()
-        msgBox.setIcon(QMessageBox.Warning)
-        msgBox.setText("La combinaison sélectionnée n'est pas autorisée.")
-        msgBox.setInformativeText(
-            "Combinaisons autorisées en in vivo:\n"
-            "• Lobes seuls\n"
-            "• Parenchyme seul\n"
-            "• Airways seul\n"
-            "• Vascular seul\n"
-            "• Parenchyme + Airways\n"
-            "• Parenchyme + Airways + Vascular"
-        )
-        msgBox.setWindowTitle("Combinaison invalide")
-        msgBox.setStandardButtons(QMessageBox.Ok)
-        msgBox.exec_()
-
-        return False
-
-
-    def check_combination_and_warn_exvivo(self, parenchyma_checked: bool, airways_checked: bool) -> bool:
-        """
-        Vérifie la combinaison des cases à cocher pour Exvivo et affiche un avertissement si la combinaison est invalide.
-        
-        Args:
-            parenchyma_checked: booléen indiquant si la case Parenchyme est cochée
-            airways_checked: booléen indiquant si la case Airways est cochée
-        Return:
-            True si la combinaison est valide, False sinon
-        """
-       
-        total_checked = parenchyma_checked + airways_checked
-
-        # Cas valides
-        if parenchyma_checked or airways_checked:
-            valid = True
-        elif airways_checked:
-            valid = True
-        elif parenchyma_checked:
-            valid = False
-        else:
-            valid = False
-
-        if valid:
-            return True
-
-        # Cas invalides → pop-up
-        msgBox = QMessageBox()
-        msgBox.setIcon(QMessageBox.Warning)
-        msgBox.setText("La combinaison sélectionnée n'est pas autorisée.")
-        msgBox.setInformativeText(
-            "Combinaisons autorisées en ex vivo:\n"
-            "• Airways seul\n"
-            "• Parenchyme + Airways"
-        )
-        msgBox.setWindowTitle("Combinaison invalide")
-        msgBox.setStandardButtons(QMessageBox.Ok)
-        msgBox.exec_()
-
-        return False
+            return "axial"
     
 
+    def check_animal(self):
+        """
+        Vérifie l'animal à segmenter.
+
+        Return:
+            str: "pig" ou "rabbit"
+        """
+        if self.checkBoxPigAxialParenchyma.isChecked():
+            return "pig"
+        else:
+            return "rabbit"
+    
+
+    def check_structure(self):
+        """
+        Vérifie la structure pulmonaire à segmenter.
+        
+        Return:
+            str: "parenchyma", "airways", "vascular", "lobes", "parenchymaairways", "all"
+        """
+        if self.checkBoxRabbitInvivoParenchyma.isChecked() or self.checkBoxPigAxialParenchyma.isChecked():
+            return "parenchyma"
+        elif self.checkBoxRabbitInvivoAirways.isChecked() or self.checkBoxRabbitExvivoAirways.isChecked():
+            return "airways"
+        elif self.checkBoxRabbitInvivoVascularTree.isChecked():
+            return "vascular"
+        elif self.checkBoxRabbitInvivoLobes.isChecked():
+            return "lobes"
+        elif self.checkBoxRabbitInvivoParenchymaAirways.isChecked() or self.checkBoxRabbitExvivoParenchymaAirways.isChecked():
+            return "parenchymaairways"
+        elif self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree.isChecked() or self.checkBoxRabbitAxialAll.isChecked():
+            return "all"
+        
+
     def onSegmentationButtonClicked(self):
-        if (
-            self.checkBoxInvivoParenchyma.isChecked() or
-            self.checkBoxInvivoAirways.isChecked() or
-            self.checkBoxInvivoVascularTree.isChecked() or
-            self.checkBoxInvivoLobes.isChecked()
-        ):
-            mode = "Invivo"
-        elif self.checkBoxAxialAll.isChecked():
-            mode = "Axial"
-        else:
-            mode = "Exvivo"
+        
+        # On verifie si c'est Invivo, Exvivo ou Axial
+        mode = self.check_mode()
 
-        if mode == "Invivo":
-            if not self.check_combination_and_warn_invivo(
-                self.checkBoxInvivoParenchyma.isChecked(),
-                self.checkBoxInvivoAirways.isChecked(),
-                self.checkBoxInvivoVascularTree.isChecked(),
-                self.checkBoxInvivoLobes.isChecked()
-            ):
-                return
-        elif mode == "Exvivo":
-            if not self.check_combination_and_warn_exvivo(
-                self.checkBoxExvivoParenchyma.isChecked(),
-                self.checkBoxExvivoAirways.isChecked()
-            ):
-                return
+        # On verifie si c'est Pig ou Rabbit
+        animal = self.check_animal()
 
-        if mode == "Invivo":
-            if self.checkBoxInvivoParenchyma.isChecked() and self.checkBoxInvivoAirways.isChecked() and self.checkBoxInvivoVascularTree.isChecked():
-                selected_key = "All"
-            elif self.checkBoxInvivoParenchyma.isChecked() and self.checkBoxInvivoAirways.isChecked():
-                selected_key = "ParenchymaAirways"
-            elif self.checkBoxInvivoParenchyma.isChecked():
-                selected_key = "Parenchyma"
-            elif self.checkBoxInvivoAirways.isChecked():
-                selected_key = "Airways"
-            elif self.checkBoxInvivoVascularTree.isChecked():
-                selected_key = "Vascular"
-            elif self.checkBoxInvivoLobes.isChecked():
-                selected_key = "Lobes"
-            else:
-                qt.QMessageBox.warning(slicer.util.mainWindow(), "Aucun modèle sélectionné", "Veuillez sélectionner au moins une structure.")
-                return
-        elif mode == "Exvivo":
-            if self.checkBoxExvivoParenchyma.isChecked() and self.checkBoxExvivoAirways.isChecked():
-                selected_key = "ParenchymaAirways"
-            elif self.checkBoxExvivoAirways.isChecked():
-                selected_key = "Airways"
-            else:
-                qt.QMessageBox.warning(slicer.util.mainWindow(), "Modèle indisponible", "Seule la combinaison Parenchyme + Airways est supportée en Exvivo.")
-                return
-        else:
-            selected_key = "All"
+        # On verifie la structure à segmenter
+        self.structure_to_segment = self.check_structure()
         
         print("\nLancement de la segmentation...")
-
-        self.structure_to_segment = selected_key
 
         try:
             input_nrrd_path = self.prepareInputForSegmentation(self.lineEditInputPath.text)
@@ -502,9 +423,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         qt.QTimer.singleShot(0, self.timer.start)
 
-        self.start_segmentation(mode, input_nrrd_path, output_path)
+        self.start_segmentation(mode, input_nrrd_path, output_path, animal)
     
-    def start_segmentation(self, mode, input_path, output_path):
+    def start_segmentation(self, mode, input_path, output_path, animal):
         """
         Fonction qui lance le processus de segmentation en arrière-plan.
         
@@ -516,6 +437,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             mode (str): Mode de segmentation (In vivo, Ex vivo)
             input_path (str): Chemin vers le fichier d'entrée
             output_path (str): Chemin vers le dossier de sortie
+            animal (str): Nom de l'animal
         """
         def worker():
             """
@@ -533,7 +455,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 self.tmp_file = os.path.join(tempfile.gettempdir(), "nnunet_context.json")
                 if os.path.exists(self.tmp_file):
                     os.remove(self.tmp_file)
-
+                
                 cmd = [
                     sys.executable, str(runner_path),
                     "--mode", mode,
@@ -541,7 +463,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                     "--input", input_path,
                     "--output", output_path,
                     "--models_dir", self.models_dir,
-                    "--name", "prediction",
+                    "--animal", animal,
                     "--tmp_file", self.tmp_file
                 ]
                 subprocess.run(cmd, text=True)
@@ -608,11 +530,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             qt.QMessageBox.warning(slicer.util.mainWindow(), "Erreur", "Aucune prédiction trouvée à charger.")
             return
         else:
-            seg_name = self.get_segmentation_name()
-            self.convert_prediction_to_segmentation(prediction_path, output_path, labelmap_name=seg_name, segmentation_name=seg_name)
+            seg_name = self.structure_to_segment
+            self.convert_prediction_to_segmentation(prediction_path, output_path, seg_name)
 
 
-    def convert_prediction_to_segmentation(self, prediction_path, output_path, labelmap_name="segmentation", segmentation_name="segmentation"):
+    def convert_prediction_to_segmentation(self, prediction_path, output_path, segmentation_name):
         """
         Convertit une prédiction nnUNet en segmentation Slicer et renomme les segments selon les noms dans dataset.json.
         
@@ -627,7 +549,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         [success, labelmapNode] = slicer.util.loadLabelVolume(prediction_path, returnNode=True)
         if not success:
             raise RuntimeError(f"Échec du chargement de la prédiction : {prediction_path}")
-        labelmapNode.SetName(labelmap_name)
+        labelmapNode.SetName(segmentation_name)
 
         # Créer la segmentation node
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
@@ -672,41 +594,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         
         if self.convertedInputToDelete and os.path.exists(self.convertedInputToDelete):
             os.remove(self.convertedInputToDelete)
-
-
-    def install_dependencies_if_needed(self):
-        """
-        Vérifie si nnUNet_package est installé.
-        Si ce n'est pas le cas, installe las bonne version puis ferme Slicer pour reload.
-        """
-        import importlib
-
-        required_versions = {
-            "nnUNet_package": "0.1.19"
-        }
-
-        to_install = None
-
-        try:
-            import nnUNet_package
-            if nnUNet_package.__version__ != required_versions["nnUNet_package"]:
-                print(f"nnUNet_package version {nnUNet_package.__version__} trouvée, {required_versions['nnUNet_package']} requise.")
-                to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
-            else:
-                print(f"nnUNet_package {nnUNet_package.__version__} OK")
-        except ImportError:
-            print("nnUNet_package non installé")
-            to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
-
-        if to_install:
-            msg = f"Le module {to_install} va être installé."
-            msg += "\nSlicer va se fermer automatiquement après l'installation. Veuillez le relancer."
-            python_exec = sys.executable
-            subprocess.check_call([python_exec, "-m", "pip", "install", "--upgrade", "--no-cache-dir", to_install])
-            slicer.util.mainWindow().close()
-            sys.exit(0)
-        else:
-            print("Toutes les dépendances sont à la bonne version.")
 
 
     def get_segmentation_name(self):
