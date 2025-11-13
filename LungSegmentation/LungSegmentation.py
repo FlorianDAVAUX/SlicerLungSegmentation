@@ -79,6 +79,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.signals.finished.connect(self.on_segmentation_finished)
         self.signals.error.connect(self.on_segmentation_error)
 
+        self.input_path = None              # Chemin vers le fichier d'entrée
         self.models_dir = None              # Dossier contenant les modèles téléchargés
         self.structure_to_segment = None    # Structure à segmenter
         self.tmp_file = None                # Fichier temporaire pour stocker le chemin du dataset json 
@@ -220,10 +221,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             path = self.handleDICOMSelection()
         else:
             return
-
-        if path:
-            # self.originalInputPath = path
-            self.lineEditInputPath.setText(path)
+        
+        self.lineEditInputPath.setText(path)
 
 
     def safeLoadVolume(self, path):
@@ -402,14 +401,14 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         print("\nLancement de la segmentation...")
 
         try:
-            input_nrrd_path = self.prepareInputForSegmentation(self.lineEditInputPath.text)
+            self.input_path = self.prepareInputForSegmentation(self.lineEditInputPath.text)
         except Exception as e:
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur d'entrée", str(e))
             return
 
         output_path = self.lineEditOutputPath.text
 
-        if not os.path.isfile(input_nrrd_path) or not input_nrrd_path.endswith('.nrrd'):
+        if not os.path.isfile(self.input_path) or not self.input_path.endswith('.nrrd'):
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur fichier", "Veuillez sélectionner un fichier NRRD valide en entrée.")
             return
 
@@ -423,9 +422,9 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         qt.QTimer.singleShot(0, self.timer.start)
 
-        self.start_segmentation(mode, input_nrrd_path, output_path, animal)
+        self.start_segmentation(mode, output_path, animal)
     
-    def start_segmentation(self, mode, input_path, output_path, animal):
+    def start_segmentation(self, mode, output_path, animal):
         """
         Fonction qui lance le processus de segmentation en arrière-plan.
         
@@ -460,7 +459,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                     sys.executable, str(runner_path),
                     "--mode", mode,
                     "--structure", self.structure_to_segment,
-                    "--input", input_path,
+                    "--input", self.input_path,
                     "--output", output_path,
                     "--models_dir", self.models_dir,
                     "--animal", animal,
@@ -546,16 +545,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         """
 
         # Charger la prédiction comme labelmap
-        [success, labelmapNode] = slicer.util.loadLabelVolume(prediction_path, returnNode=True)
-        if not success:
-            raise RuntimeError(f"Échec du chargement de la prédiction : {prediction_path}")
+        labelmapNode = slicer.util.loadLabelVolume(prediction_path)
         labelmapNode.SetName(segmentation_name)
 
-        # Créer la segmentation node
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
         slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
 
-        
         with open(self.tmp_file, 'r') as f:
             data = json.load(f)
         
@@ -584,9 +579,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # Sauvegarder la segmentation
         segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
         slicer.util.saveNode(segmentationNode, segmentation_path)
-
-        # Nettoyage
-        slicer.mrmlScene.RemoveNode(labelmapNode)
 
         # Suppression de l'ancienne prédiction si elle existe
         if os.path.exists(prediction_path):
