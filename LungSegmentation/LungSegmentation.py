@@ -265,7 +265,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             slicer.util.mainWindow(),
             "Sélectionner un dossier DICOM",
             ""
-        )
+        )   
         if not dicomDir:
             return None
 
@@ -527,72 +527,50 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         else:
             seg_name = self.structure_to_segment
             self.convert_prediction_to_segmentation(prediction_path, output_path, seg_name)
-
-
+                
     def convert_prediction_to_segmentation(self, prediction_path, output_path, segmentation_name):
         """
-        Convertit une prédiction nnUNet en segmentation Slicer et renomme les segments selon les noms dans dataset.json.
-        
-        Args:
-            prediction_path (str): Chemin du fichier de prédiction (.nrrd).
-            output_path (str): Chemin du dossier de sortie pour la segmentation.
-            labelmap_name (str): Nom du labelmap à créer.
-            segmentation_name (str): Nom de la segmentation à créer.
+        Convertit une prédiction nnUNet (.nrrd) en segmentation Slicer
+        en conservant strictement la même géométrie.
         """
 
-        # Charger la prédiction comme labelmap
+        # Charger la prédiction comme un labelmap
         labelmapNode = slicer.util.loadLabelVolume(prediction_path)
-        labelmapNode.SetName(segmentation_name)
+        labelmapNode.SetName(segmentation_name + "_labelmap")
 
-        # # Créer la segmentation
-        # segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
-
-        # referenceVolumeNode = slicer
-
-        # segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(referenceVolumeNode)
-
-        # Importer le labelmap dans la segmentation
-        # slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
-
+        # Créer un nœud de segmentation
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
-        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(self.geometry_input)
+        segmentationNode.CreateDefaultDisplayNodes()
+        
+        # Forcer la même géométrie
+        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(labelmapNode)
 
-        print("Size of geometry input: ", self.geometry_input.GetImageData().GetDimensions())
+        # Importer le labelmap sans modification de taille
+        slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
+
+        # Vérifier et renommer les segments selon le label_map
+        segment_ids = vtk.vtkStringArray()
+        segmentationNode.GetSegmentation().GetSegmentIDs(segment_ids)
+
+        slicer.mrmlScene.RemoveNode(labelmapNode)
 
         with open(self.tmp_file, 'r') as f:
             data = json.load(f)
-        
         dataset_json_path = data["dataset_json_path"]
 
         # Charger le dataset.json du modèle
         with open(dataset_json_path, "r") as f:
             dataset = json.load(f)
 
-        # labels = { "lobe_inf_d": 1, ... } → inverse pour avoir {1: "lobe_inf_d"}
         raw_label_map = dataset.get("labels", {})
         label_map = {int(v): k for k, v in raw_label_map.items() if int(v) > 0}
-
-        # Renommer les segments
-        segment_ids = vtk.vtkStringArray()
-        segmentationNode.GetSegmentation().GetSegmentIDs(segment_ids)
 
         for i in range(segment_ids.GetNumberOfValues()):
             segment_id = segment_ids.GetValue(i)
             segment = segmentationNode.GetSegmentation().GetSegment(segment_id)
-
-            label_index = i + 1 
+            label_index = i + 1
             name = label_map.get(label_index, f"Classe_{label_index}")
             segment.SetName(name)
 
-        # Sauvegarder la segmentation
         segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
         slicer.util.saveNode(segmentationNode, segmentation_path)
-
-        # slicer.mrmlScene.RemoveNode(labelmapNode)
-
-        # Suppression de l'ancienne prédiction si elle existe
-        if os.path.exists(prediction_path):
-            os.remove(prediction_path)
-        
-        if self.convertedInputToDelete and os.path.exists(self.convertedInputToDelete):
-            os.remove(self.convertedInputToDelete)
