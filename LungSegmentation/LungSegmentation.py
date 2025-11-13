@@ -80,14 +80,14 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.signals.error.connect(self.on_segmentation_error)
 
         self.input_path = None              # Chemin vers le fichier d'entrée
+        self.geometry_input = None          # Geometrie du fichier d'entrée pour resampler le masque de sortie
+
         self.models_dir = None              # Dossier contenant les modèles téléchargés
         self.structure_to_segment = None    # Structure à segmenter
         self.tmp_file = None                # Fichier temporaire pour stocker le chemin du dataset json 
         self.name = None                    # Nom de la prédiction future
 
         self.convertedInputToDelete = None  # Pour suppression future
-        self.originalInputPath = None       # Pour affichage dans le champ de texte
-
 
     def setup(self):
         """
@@ -153,7 +153,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         import importlib
 
         required_versions = {
-            "nnUNet_package": "0.2.1"
+            "nnUNet_package": "0.2.3"
         }
 
         to_install = None
@@ -230,14 +230,10 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Charge un volume de manière compatible avec les versions récentes et anciennes de Slicer.
         Retourne le node chargé ou None en cas d'échec.
         """
-        try:
-            # Nouvelle API (Slicer 5.6+)
-            node = slicer.util.loadVolume(path)
-            return node
-        except TypeError:
-            # Ancienne API (avant Slicer 5.6)
-            success, node = slicer.util.loadVolume(path, returnNode=True)
-            return node if success else None
+        node = slicer.util.loadVolume(path)
+        self.geometry_input = node
+        return node  # ou (node, geometryNode) si tu veux la renvoyer
+
 
 
     def handleImageSelection(self):
@@ -253,8 +249,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if not selected:
             return None
 
-        loadedNode = self.safeLoadVolume(selected)
-        if not loadedNode:
+        node = self.safeLoadVolume(selected)
+        if not node:
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Impossible de charger le fichier sélectionné.")
             return None
 
@@ -548,8 +544,20 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         labelmapNode = slicer.util.loadLabelVolume(prediction_path)
         labelmapNode.SetName(segmentation_name)
 
+        # # Créer la segmentation
+        # segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
+
+        # referenceVolumeNode = slicer
+
+        # segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(referenceVolumeNode)
+
+        # Importer le labelmap dans la segmentation
+        # slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
+
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
-        slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
+        segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(self.geometry_input)
+
+        print("Size of geometry input: ", self.geometry_input.GetImageData().GetDimensions())
 
         with open(self.tmp_file, 'r') as f:
             data = json.load(f)
@@ -580,35 +588,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
         slicer.util.saveNode(segmentationNode, segmentation_path)
 
+        # slicer.mrmlScene.RemoveNode(labelmapNode)
+
         # Suppression de l'ancienne prédiction si elle existe
         if os.path.exists(prediction_path):
             os.remove(prediction_path)
         
         if self.convertedInputToDelete and os.path.exists(self.convertedInputToDelete):
             os.remove(self.convertedInputToDelete)
-
-
-    def get_segmentation_name(self):
-        """
-        Retourne le nom de la segmentation basé sur les cases à cocher sélectionnées.
-        Si aucune case n'est cochée, retourne "Segmentation".
-        Returns:
-            str: Nom de la segmentation.
-        """
-        structures = []
-
-        if self.checkBoxInvivoParenchyma.isChecked() or self.checkBoxExvivoParenchyma.isChecked():
-            structures.append("parenchyma")
-        if self.checkBoxInvivoAirways.isChecked() or self.checkBoxExvivoAirways.isChecked():
-            structures.append("airways")
-        if self.checkBoxInvivoVascularTree.isChecked():
-            structures.append("vascular_tree")
-        if self.checkBoxInvivoLobes.isChecked():
-            structures.append("lobes")
-        if self.checkBoxAxialAll.isChecked():
-            structures.append("axial")
-
-        if not structures:
-            return "Segmentation"
-
-        return "_".join(structures)
