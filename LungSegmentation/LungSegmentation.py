@@ -23,49 +23,61 @@ import importlib.resources as resources
 from qt import QTimer, QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
 
 
-###################################################### Objet pour les signaux permettant de savoir si la segmentation est terminée ou s'il y a une erreur ######################################################
+###################################################### Object for signals to know if the segmentation is finished or if there is an error ######################################################
 
 class SegmentationSignals(QObject):
     """
-    Signaux pour la segmentation
+    Signals for segmentation
     """
     finished = Signal(bool)
     error = Signal(str)
     progress = Signal(int)
 
-###################################################### Classe principale du module ######################################################
+###################################################### Main class of the module ######################################################
 
 class LungSegmentation(ScriptedLoadableModule):
     """
-    Module de segmentation des poumons
+    Lung segmentation module
     """
     def __init__(self, parent):
         """
-        Constructeur du module
+        Constructor module
+
+        Args:
+            parent (QWidget): Parent widget.
+
+        Returns:
+            None
         """
         parent.title = "LungSegmentation"
         parent.categories = ["Segmentation"]
         parent.contributors = ["Florian Davaux (CREATIS)"]
-        parent.helpText = "Segmentation automatique des structures pulmonaires"
-        parent.acknowledgementText = "Projet KOLOR SPCCT"
+        parent.helpText = "Automatic segmentation of pulmonary structures"
+        parent.acknowledgementText = "KOLOR SPCCT project"
         self.parent = parent
         self.imagesTs_path = None
         self.parent.icon = qt.QIcon(os.path.join(os.path.dirname(__file__), 'Resources', 'Icons', 'LungSegmentation.png'))
         
 
-####################################################### Classe pour l'interface graphique du module ######################################################
+####################################################### Class for the module's graphical interface ######################################################
 
 class LungSegmentationWidget(ScriptedLoadableModuleWidget):
     """
-    Widget pour l'interface graphique du module de segmentation des poumons
+    Widget for the graphical interface of the lung segmentation module
     """
     def __init__(self, parent=None):
         """
-        Constructeur du widget
+        Widget constructor
+
+        Args:
+            parent (QWidget): Parent widget.
+            
+        Returns:
+            None
         """
         ScriptedLoadableModuleWidget.__init__(self, parent)
 
-        self.temp_dir_obj = None # Temporaire pour stocker les fichiers
+        self.temp_dir_obj = None # Temporary to store files
 
         self.timer = qt.QTimer()
         self.timer.setInterval(1000)
@@ -79,19 +91,26 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.signals.finished.connect(self.on_segmentation_finished)
         self.signals.error.connect(self.on_segmentation_error)
 
-        self.input_path = None              # Chemin vers le fichier d'entrée
-        self.geometry_input = None          # Geometrie du fichier d'entrée pour resampler le masque de sortie
+        self.input_path = None              # Path to the input file
+        self.geometry_input = None          # Geometry of the input file to resample the output mask
 
-        self.models_dir = None              # Dossier contenant les modèles téléchargés
-        self.structure_to_segment = None    # Structure à segmenter
-        self.tmp_file = None                # Fichier temporaire pour stocker le chemin du dataset json 
-        self.name = None                    # Nom de la prédiction future
+        self.models_dir = None              # Folder containing the downloaded models
+        self.structure_to_segment = None    # Structure to segment
+        self.tmp_file = None                # Temporary file to store the path of the dataset json 
+        self.name = None                    # Name of the future prediction
 
-        self.convertedInputToDelete = None  # Pour suppression future
+        self.convertedInputToDelete = None  # For future deletion
 
     def setup(self):
         """
-        Configuration de l'interface graphique du module
+        Sets up the module's GUI.
+        Loads the UI file and connects the buttons to their functions.
+
+        Args:
+            None
+
+        Returns:
+            None
         """
         self.install_dependencies_if_needed()
 
@@ -100,7 +119,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.extensionPath = os.path.dirname(__file__)
         uiFilePath = os.path.join(self.extensionPath, 'Resources', 'UI', 'LungSegmentation.ui')
         
-        # Chargement correct de l'UI
+        # Correct UI loading
         uiWidget = slicer.util.loadUI(uiFilePath)
         self.layout.addWidget(uiWidget)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -147,13 +166,19 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def install_dependencies_if_needed(self):
         """
-        Vérifie si nnUNet_package est installé.
-        Si ce n'est pas le cas, installe las bonne version puis ferme Slicer pour reload.
+        Checks if nnUNet_package is installed.
+        If not, installs the correct version then closes Slicer to reload.
+
+        Args:
+            None    
+
+        Returns:
+            None
         """
         import importlib
 
         required_versions = {
-            "nnUNet_package": "0.2.3"
+            "nnUNet_package": "0.2.4"
         }
 
         to_install = None
@@ -161,31 +186,34 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         try:
             import nnUNet_package
             if nnUNet_package.__version__ != required_versions["nnUNet_package"]:
-                print(f"nnUNet_package version {nnUNet_package.__version__} trouvée, {required_versions['nnUNet_package']} requise.")
+                print(f"nnUNet_package version {nnUNet_package.__version__} found, {required_versions['nnUNet_package']} required.")
                 to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
             else:
                 print(f"nnUNet_package {nnUNet_package.__version__} OK")
         except ImportError:
-            print("nnUNet_package non installé")
+            print("nnUNet_package not installed")
             to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
 
         if to_install:
-            msg = f"Le module {to_install} va être installé."
-            msg += "\nSlicer va se fermer automatiquement après l'installation. Veuillez le relancer."
+            msg = f"Module {to_install} will be installed."
+            msg += "\nSlicer will close automatically after installation. Please relaunch it."
             python_exec = sys.executable
             subprocess.check_call([python_exec, "-m", "pip", "install", "--upgrade", "--no-cache-dir", to_install])
             slicer.util.mainWindow().close()
             sys.exit(0)
         else:
-            print("Toutes les dépendances sont à la bonne version.")
+            print("All dependencies are at the correct version.")
     
     
     def openDialog(self, which):
         """
-        Ouvre une boîte de dialogue pour sélectionner un fichier ou un dossier.
+        Opens a dialog box to select a file or folder.
 
         Args:
-            which (str): "input" pour sélectionner un fichier d'entrée, "output" pour sélectionner un dossier de sortie.
+            which (str): "input" to select an input file, "output" to select an output folder.
+        
+        Returns:
+            None
         """
         if which == "input":
             selectedPath = self.selectInputFile()
@@ -194,7 +222,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         elif which == "output":
             selectedDir = qt.QFileDialog.getExistingDirectory(
                 slicer.util.mainWindow(),
-                "Sélectionner un dossier de sortie",
+                "Select an output folder",
                 ""
             )
             if selectedDir:
@@ -203,15 +231,21 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def selectInputFile(self):
         """
-        Affiche une boîte de dialogue pour sélectionner un fichier image ou un dossier DICOM.
-        Ne fait pas de conversion ici, juste stocke le chemin original.
+        Displays a dialog box to select an image file or a DICOM folder.
+        Does not perform conversion here, just stores the original path.
+
+        Args:
+            None
+
+        Returns:
+            str: Path to the selected file or folder.
         """
         optionsBox = qt.QMessageBox(slicer.util.mainWindow())
-        optionsBox.setWindowTitle("Choisir une source d'image")
-        optionsBox.setText("Sélectionnez le type d'entrée :")
-        imageButton = optionsBox.addButton("Fichier image (.nrrd, .nii, .mha...)", qt.QMessageBox.ActionRole)
-        dicomButton = optionsBox.addButton("Dossier DICOM", qt.QMessageBox.ActionRole)
-        optionsBox.addButton("Annuler", qt.QMessageBox.RejectRole)
+        optionsBox.setWindowTitle("Choose image source")
+        optionsBox.setText("Select the input type:")
+        imageButton = optionsBox.addButton("Image file (.nrrd, .nii, .mha...)", qt.QMessageBox.ActionRole)
+        dicomButton = optionsBox.addButton("DICOM folder", qt.QMessageBox.ActionRole)
+        optionsBox.addButton("Cancel", qt.QMessageBox.RejectRole)
         optionsBox.exec_()
 
         clicked = optionsBox.clickedButton()
@@ -227,22 +261,33 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def safeLoadVolume(self, path):
         """
-        Charge un volume de manière compatible avec les versions récentes et anciennes de Slicer.
-        Retourne le node chargé ou None en cas d'échec.
+        Loads a volume in a way compatible with recent and older versions of Slicer.
+        Returns the loaded node or None on failure.
+
+        Args:
+            path (str): Path to the image file.
+        
+        Returns:
+            vtkMRMLScalarVolumeNode: Loaded volume node.
         """
         node = slicer.util.loadVolume(path)
         self.geometry_input = node
-        return node  # ou (node, geometryNode) si tu veux la renvoyer
-
+        return node
 
 
     def handleImageSelection(self):
         """
-        Sélectionne un fichier image, le charge dans le viewer, sans conversion immédiate.
+        Selects an image file, loads it into the viewer, without immediate conversion.
+
+        Args:
+            None
+
+        Returns:
+            str: Path to the selected image file.
         """
         selected = qt.QFileDialog.getOpenFileName(
             slicer.util.mainWindow(),
-            "Sélectionner une image",
+            "Select an image",
             "",
             "Images (*.nrrd *.nii *.nii.gz *.mha)"
         )
@@ -251,7 +296,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         node = self.safeLoadVolume(selected)
         if not node:
-            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Impossible de charger le fichier sélectionné.")
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Error", "Could not load the selected file.")
             return None
 
         return selected
@@ -259,11 +304,17 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def handleDICOMSelection(self):
         """
-        Sélectionne un dossier DICOM, charge le premier fichier dans le viewer, sans conversion immédiate.
+        Selects a DICOM folder, loads the first file into the viewer, without immediate conversion.
+
+        Args:
+            None
+        
+        Returns:
+            str: Path to the selected DICOM folder.
         """
         dicomDir = qt.QFileDialog.getExistingDirectory(
             slicer.util.mainWindow(),
-            "Sélectionner un dossier DICOM",
+            "Select a DICOM folder",
             ""
         )   
         if not dicomDir:
@@ -271,12 +322,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         dcmFiles = [os.path.join(dicomDir, f) for f in os.listdir(dicomDir) if f.lower().endswith(".dcm")]
         if not dcmFiles:
-            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Aucun fichier DICOM trouvé.")
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Error", "No DICOM file found.")
             return None
 
         node = self.safeLoadVolume(dcmFiles[0])
         if not node:
-            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur", "Échec du chargement du fichier DICOM.")
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Error", "Failed to load DICOM file.")
             return None
 
         return dicomDir
@@ -284,24 +335,30 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
     
     def prepareInputForSegmentation(self, inputPath):
         """
-        Vérifie et prépare le chemin d'entrée pour la segmentation.
-        Si besoin, convertit en .nrrd et retourne le chemin converti.
+        Checks and prepares the input path for segmentation.
+        If necessary, converts to .nrrd and returns the converted path.
+
+        Args:
+            inputPath (str): Path to the input file or folder.
+        
+        Returns:
+            str: Path to the .nrrd file ready for segmentation.
         """
         inputPath = inputPath.strip()
         if not inputPath or not os.path.exists(inputPath):
-            raise RuntimeError("Chemin d'entrée invalide.")
+            raise RuntimeError("Invalid input path.")
 
         ext = os.path.splitext(inputPath)[1].lower()
         is_dir = os.path.isdir(inputPath)
 
         if is_dir:
-            # Dossier DICOM
+            # DICOM folder
             dcmFiles = [os.path.join(inputPath, f) for f in os.listdir(inputPath) if f.lower().endswith(".dcm")]
             if not dcmFiles:
-                raise RuntimeError("Aucun fichier DICOM trouvé dans le dossier.")
+                raise RuntimeError("No DICOM file found in the folder.")
             success, volumeNode = slicer.util.loadVolume(dcmFiles[0], returnNode=True)
             if not success:
-                raise RuntimeError("Erreur lors du chargement du volume DICOM.")
+                raise RuntimeError("Error loading DICOM volume.")
             convertedPath = os.path.join(slicer.app.temporaryPath, "converted_from_dicom.nrrd")
             slicer.util.saveNode(volumeNode, convertedPath)
             self.convertedInputToDelete = convertedPath
@@ -309,10 +366,10 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             return convertedPath
 
         elif ext in [".mha", ".nii", ".nii.gz"]:
-            # Fichier image à convertir
+            # Image file to convert
             success, volumeNode = slicer.util.loadVolume(inputPath, returnNode=True)
             if not success:
-                raise RuntimeError("Erreur lors du chargement de l'image.")
+                raise RuntimeError("Error loading image.")
             convertedPath = os.path.join(slicer.app.temporaryPath, "converted_from_image.nrrd")
             slicer.util.saveNode(volumeNode, convertedPath)
             self.convertedInputToDelete = convertedPath
@@ -320,19 +377,21 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             return convertedPath
 
         elif ext == ".nrrd":
-            # ✅ Aucun traitement requis
             return inputPath
 
         else:
-            raise RuntimeError("Format non supporté. Veuillez sélectionner un fichier .nrrd, .mha, .nii, ou un dossier DICOM.")
+            raise RuntimeError("Unsupported format. Please select a .nrrd, .mha, .nii file, or a DICOM folder.")
 
 
     def check_mode(self):
         """
-        Vérifie le mode de segmentation (in vivo, ex vivo ou axial).
+        Checks the segmentation mode (in vivo, ex vivo or axial).
 
-        Return:
-            str: "invivo", "exvivo" ou "axial"
+        Args:
+            None
+
+        Returns:
+            str: "invivo", "exvivo" or "axial"
         """
         if (
             self.checkBoxRabbitInvivoParenchyma.isChecked() or
@@ -351,10 +410,13 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def check_animal(self):
         """
-        Vérifie l'animal à segmenter.
+        Checks the animal to segment.
 
-        Return:
-            str: "pig" ou "rabbit"
+        Args:
+            None
+
+        Returns:
+            str: "pig" or "rabbit"
         """
         if self.checkBoxPigAxialParenchyma.isChecked():
             return "pig"
@@ -364,9 +426,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def check_structure(self):
         """
-        Vérifie la structure pulmonaire à segmenter.
+        Checks the pulmonary structure to segment.
+
+        Args:
+            None
         
-        Return:
+        Returns:
             str: "parenchyma", "airways", "vascular", "lobes", "parenchymaairways", "all"
         """
         if self.checkBoxRabbitInvivoParenchyma.isChecked() or self.checkBoxPigAxialParenchyma.isChecked():
@@ -384,28 +449,38 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         
 
     def onSegmentationButtonClicked(self):
+        """
+        Function called when the segmentation button is clicked.
+        It prepares the parameters and starts the segmentation in the background.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         
-        # On verifie si c'est Invivo, Exvivo ou Axial
+        # Check if it is Invivo, Exvivo or Axial
         mode = self.check_mode()
 
-        # On verifie si c'est Pig ou Rabbit
+        # Check if it is Pig or Rabbit
         animal = self.check_animal()
 
-        # On verifie la structure à segmenter
+        # Check the structure to segment
         self.structure_to_segment = self.check_structure()
         
-        print("\nLancement de la segmentation...")
+        print("\nStarting segmentation...")
 
         try:
             self.input_path = self.prepareInputForSegmentation(self.lineEditInputPath.text)
         except Exception as e:
-            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur d'entrée", str(e))
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "Input Error", str(e))
             return
 
         output_path = self.lineEditOutputPath.text
 
         if not os.path.isfile(self.input_path) or not self.input_path.endswith('.nrrd'):
-            qt.QMessageBox.critical(slicer.util.mainWindow(), "Erreur fichier", "Veuillez sélectionner un fichier NRRD valide en entrée.")
+            qt.QMessageBox.critical(slicer.util.mainWindow(), "File Error", "Please select a valid NRRD input file.")
             return
 
         extension_dir = os.path.dirname(__file__)
@@ -420,33 +495,43 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         self.start_segmentation(mode, output_path, animal)
     
+
     def start_segmentation(self, mode, output_path, animal):
         """
-        Fonction qui lance le processus de segmentation en arrière-plan.
+        Function that starts the segmentation process in the background.
         
-        Elle appelle le script nnunet_runner.py avec les paramètres de la segmentation.
-        Elle attend que le processus se termine, puis emet le signal finished si tout se passe bien,
-        ou le signal error si un problème se produit.
+        It calls the nnunet_runner.py script with the segmentation parameters.
+        It waits for the process to finish, then emits the finished signal if everything goes well,
+        or the error signal if a problem occurs.
         
         Args:
-            mode (str): Mode de segmentation (In vivo, Ex vivo)
-            input_path (str): Chemin vers le fichier d'entrée
-            output_path (str): Chemin vers le dossier de sortie
-            animal (str): Nom de l'animal
+            mode (str): Segmentation mode (In vivo, Ex vivo)
+            input_path (str): Path to the input file
+            output_path (str): Path to the output folder
+            animal (str): Name of the animal
+        
+        Returns:
+            None
         """
         def worker():
             """
-            Fonction worker qui lance le processus de segmentation en arrière-plan.
+            Worker function that starts the segmentation process in the background.
             
-            Elle appelle le script nnunet_runner.py avec les paramètres de la segmentation.
-            Elle attend que le processus se termine, puis emet le signal finished si tout se passe bien,
-            ou le signal error si un problème se produit.
+            It calls the nnunet_runner.py script with the segmentation parameters.
+            It waits for the process to finish, then emits the finished signal if everything goes well,
+            or the error signal if a problem occurs.
+
+            Args:
+                None
+
+            Returns:
+                None
             """
             try:
                 from pathlib import Path
                 runner_path = Path(__file__).parent/"scripts"/"nnunet_runner.py"
 
-                # Fichier temporaire pour stocker le chemin du dataset json
+                # Temporary file to store the path of the dataset json
                 self.tmp_file = os.path.join(tempfile.gettempdir(), "nnunet_context.json")
                 if os.path.exists(self.tmp_file):
                     os.remove(self.tmp_file)
@@ -471,24 +556,30 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def on_segmentation_error(self, error_message):
         """
-        Fonction appelée en cas d'erreur lors de la segmentation.
-        Elle arrête le timer, met à jour la barre de progression et affiche un message d'erreur.
+        Function called in case of an error during segmentation.
+        It stops the timer, updates the progress bar and displays an error message.
         
         Args:
-            error_message (str): Message d'erreur à afficher.
+            error_message (str): Error message to display.
+        
+        Returns:
+            None
         """
         self.timer.stop()
         self.progressBar.setVisible(False)
-        slicer.util.errorDisplay(f"Erreur lors de la segmentation :\n{error_message}")
+        slicer.util.errorDisplay(f"Error during segmentation :\n{error_message}")
 
 
     def on_segmentation_finished(self, success):
         """
-        Fonction appelée lorsque la segmentation est terminée.
-        Elle arrête le timer, met à jour la barre de progression et affiche un message de succès.
+        Function called when segmentation is finished.
+        It stops the timer, updates the progress bar and displays a success message.
         
         Args:
-            success (bool): Indique si la segmentation a réussi ou non.
+            success (bool): Indicates whether the segmentation was successful or not.
+        
+        Returns:
+            None
         """
         self.timer.stop()
         self.progressBar.setValue(100)
@@ -496,13 +587,19 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         if success:
             self.load_prediction(self.lineEditOutputPath.text)
-            slicer.util.infoDisplay("Segmentation terminée avec succès.")
+            slicer.util.infoDisplay("Segmentation finished successfully.")
 
 
     def updateProgressBar(self):
         """
-        Met à jour la barre de progression toutes les secondes.
-        Si la durée de progression est dépassée, la barre est bloquée à 99% tant que la segmentation n'est pas finie.
+        Updates the progress bar every second.
+        If the progress duration is exceeded, the bar is blocked at 99% until segmentation is finished.
+
+        Args:
+            None
+
+        Returns:
+            None
         """
         if self.elapsedSeconds >= self.progressDuration:
             self.progressBar.setValue(99)
@@ -515,14 +612,17 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def load_prediction(self, output_path):
         """
-        Charge la prédiction générée par nnUNet dans Slicer.
+        Loads the prediction generated by nnUNet into Slicer.
 
         Args:
-            output_path (str): Chemin du dossier de sortie où la prédiction est enregistrée.
+            output_path (str): Path to the output folder where the prediction is saved.
+        
+        Returns:
+            None
         """
         prediction_path = os.path.join(output_path, "001.nrrd")
         if not os.path.exists(prediction_path):
-            qt.QMessageBox.warning(slicer.util.mainWindow(), "Erreur", "Aucune prédiction trouvée à charger.")
+            qt.QMessageBox.warning(slicer.util.mainWindow(), "Error", "No prediction found to load.")
             return
         else:
             seg_name = self.structure_to_segment
@@ -530,25 +630,33 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 
     def convert_prediction_to_segmentation(self, prediction_path, output_path, segmentation_name):
         """
-        Convertit une prédiction nnUNet (.nrrd) en segmentation Slicer
-        en conservant strictement la même géométrie.
+        Converts an nnUNet prediction (.nrrd) to Slicer segmentation
+        while strictly maintaining the same geometry.
+
+        Args:
+            prediction_path (str): Path to the prediction file (.nrrd).
+            output_path (str): Output folder to save the segmentation.
+            segmentation_name (str): Name to give to the segmentation.
+        
+        Returns:
+            str: Path to the saved segmentation file.
         """
 
-        # Charger la prédiction comme un labelmap
+        # Load the prediction as a labelmap
         labelmapNode = slicer.util.loadLabelVolume(prediction_path)
         labelmapNode.SetName(segmentation_name + "_labelmap")
 
-        # Créer un nœud de segmentation
+        # Create a segmentation node
         segmentationNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", segmentation_name)
         segmentationNode.CreateDefaultDisplayNodes()
         
-        # Forcer la même géométrie
+        # Force the same geometry
         segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(labelmapNode)
 
-        # Importer le labelmap sans modification de taille
+        # Import the labelmap without modifying size
         slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode)
 
-        # Vérifier et renommer les segments selon le label_map
+        # Check and rename segments according to the label_map
         segment_ids = vtk.vtkStringArray()
         segmentationNode.GetSegmentation().GetSegmentIDs(segment_ids)
 
@@ -558,7 +666,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             data = json.load(f)
         dataset_json_path = data["dataset_json_path"]
 
-        # Charger le dataset.json du modèle
+        # Load the model's dataset.json
         with open(dataset_json_path, "r") as f:
             dataset = json.load(f)
 
@@ -569,7 +677,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             segment_id = segment_ids.GetValue(i)
             segment = segmentationNode.GetSegmentation().GetSegment(segment_id)
             label_index = i + 1
-            name = label_map.get(label_index, f"Classe_{label_index}")
+            name = label_map.get(label_index, f"Class_{label_index}")
             segment.SetName(name)
 
         segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
