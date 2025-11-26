@@ -147,6 +147,13 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         #########################################################################################
 
+        ######################################### RAT ###########################################
+
+        # IN VIVO
+        self.checkBoxRatInvivoParenchymaAirwaysKidneysHeart = uiWidget.findChild(qt.QCheckBox, "checkBoxRatInvivoParenchymaAirwaysKidneysHeart")
+
+        #########################################################################################
+
         self.browseInputButton = uiWidget.findChild(qt.QPushButton, "browseInputButton")
         self.lineEditInputPath = uiWidget.findChild(qt.QLineEdit, "inputLineEdit")
 
@@ -178,7 +185,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         import importlib
 
         required_versions = {
-            "nnUNet_package": "0.2.4"
+            "nnUNet_package": "0.2.7"
         }
 
         to_install = None
@@ -399,7 +406,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             self.checkBoxRabbitInvivoVascularTree.isChecked() or
             self.checkBoxRabbitInvivoLobes.isChecked() or
             self.checkBoxRabbitInvivoParenchymaAirways.isChecked() or
-            self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree.isChecked()
+            self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree.isChecked() or
+            self.checkBoxRatInvivoParenchymaAirwaysKidneysHeart.isChecked()
         ):
             return "invivo"
         elif self.checkBoxRabbitExvivoAirways.isChecked() or self.checkBoxRabbitExvivoParenchymaAirways.isChecked():
@@ -416,10 +424,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             None
 
         Returns:
-            str: "pig" or "rabbit"
+            str: "pig", "rat" or "rabbit"
         """
         if self.checkBoxPigAxialParenchyma.isChecked():
             return "pig"
+        elif self.checkBoxRatInvivoParenchymaAirwaysKidneysHeart.isChecked():
+            return "rat"
         else:
             return "rabbit"
     
@@ -446,6 +456,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             return "parenchymaairways"
         elif self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree.isChecked() or self.checkBoxRabbitAxialAll.isChecked():
             return "all"
+        elif self.checkBoxRatInvivoParenchymaAirwaysKidneysHeart.isChecked():
+            return "parenchymaairwayskidneysheart"
         
 
     def onSegmentationButtonClicked(self):

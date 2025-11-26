@@ -164,7 +164,7 @@
          <item row="0" column="0">
           <widget class="QCheckBox" name="checkBoxRabbitAxialAll">
            <property name="text">
-            <string>All</string>
+            <string>Parenchyma/Airways/Vascular Tree</string>
            </property>
           </widget>
          </item>
@@ -177,11 +177,11 @@
 
    <!-- PIG SECTION -->
    <item>
-    <widget class="ctkCollapsibleButton" name="rabbitCollapsibleButton" native="true">
+    <widget class="ctkCollapsibleButton" name="pigCollapsibleButton" native="true">
      <property name="text" stdset="0">
       <string>Pig</string>
      </property>
-     <layout class="QVBoxLayout" name="layoutRabbit">
+     <layout class="QVBoxLayout" name="layoutPig">
 
       <!-- AXIAL -->
       <item>
@@ -193,7 +193,36 @@
          <item row="0" column="0">
           <widget class="QCheckBox" name="checkBoxPigAxialParenchyma">
            <property name="text">
-            <string>All</string>
+            <string>Parenchyma</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <!-- RAT SECTION -->
+   <item>
+    <widget class="ctkCollapsibleButton" name="ratCollapsibleButton" native="true">
+     <property name="text" stdset="0">
+      <string>Rat</string>
+     </property>
+     <layout class="QVBoxLayout" name="layoutRat">
+
+      <!-- INVIVO -->
+      <item>
+       <widget class="QGroupBox" name="groupInvivo">
+        <property name="title">
+         <string>Invivo</string>
+        </property>
+        <layout class="QFormLayout" name="formLayoutInvivo">
+         <item row="0" column="0">
+          <widget class="QCheckBox" name="checkBoxRatInvivoParenchymaAirwaysKidneysHeart">
+           <property name="text">
+            <string>Parenchyma/Airways/Kidneys/Heart</string>
            </property>
           </widget>
          </item>
