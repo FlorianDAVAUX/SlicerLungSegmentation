@@ -77,8 +77,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         """
         ScriptedLoadableModuleWidget.__init__(self, parent)
 
-        self.temp_dir_obj = None # Temporary to store files
-
         self.timer = qt.QTimer()
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.updateProgressBar)
@@ -92,8 +90,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.signals.error.connect(self.on_segmentation_error)
 
         self.input_path = None              # Path to the input file
-        self.geometry_input = None          # Geometry of the input file to resample the output mask
-
+        self.input_node = None              # Input volume node
         self.models_dir = None              # Folder containing the downloaded models
         self.structure_to_segment = None    # Structure to segment
         self.tmp_file = None                # Temporary file to store the path of the dataset json 
@@ -277,9 +274,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Returns:
             vtkMRMLScalarVolumeNode: Loaded volume node.
         """
-        node = slicer.util.loadVolume(path)
-        self.geometry_input = node
-        return node
+        self.input_node = slicer.util.loadVolume(path)
+        return self.input_node
 
 
     def handleImageSelection(self):
@@ -369,7 +365,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             convertedPath = os.path.join(slicer.app.temporaryPath, "converted_from_dicom.nrrd")
             slicer.util.saveNode(volumeNode, convertedPath)
             self.convertedInputToDelete = convertedPath
-            slicer.mrmlScene.RemoveNode(volumeNode)
+            # slicer.mrmlScene.RemoveNode(volumeNode)
             return convertedPath
 
         elif ext in [".mha", ".nii", ".nii.gz"]:
@@ -380,7 +376,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             convertedPath = os.path.join(slicer.app.temporaryPath, "converted_from_image.nrrd")
             slicer.util.saveNode(volumeNode, convertedPath)
             self.convertedInputToDelete = convertedPath
-            slicer.mrmlScene.RemoveNode(volumeNode)
+            # slicer.mrmlScene.RemoveNode(volumeNode)
             return convertedPath
 
         elif ext == ".nrrd":
@@ -600,8 +596,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if success:
             self.load_prediction(self.lineEditOutputPath.text)
             slicer.util.infoDisplay("Segmentation finished successfully.")
-
-
+        
     def updateProgressBar(self):
         """
         Updates the progress bar every second.
@@ -694,3 +689,15 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
         slicer.util.saveNode(segmentationNode, segmentation_path)
+        os.remove(prediction_path)
+
+        # Clean up temporary converted input if any
+        if self.convertedInputToDelete and os.path.exists(self.convertedInputToDelete):
+            try:
+                os.remove(self.convertedInputToDelete)
+            except Exception as e:
+                print(f"Error deleting converted input: {e}")
+            finally:
+                self.convertedInputToDelete = None
+        else:
+            print("No converted input to delete.")
