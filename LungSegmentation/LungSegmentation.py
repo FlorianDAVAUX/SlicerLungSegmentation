@@ -20,6 +20,7 @@ import threading
 import importlib.util
 from slicer.ScriptedLoadableModule import *
 import importlib.resources as resources
+from importlib.metadata import version, PackageNotFoundError
 from qt import QTimer, QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
 
 
@@ -42,15 +43,9 @@ class LungSegmentation(ScriptedLoadableModule):
     def __init__(self, parent):
         """
         Constructor module
-
-        Args:
-            parent (QWidget): Parent widget.
-
-        Returns:
-            None
         """
         parent.title = "LungSegmentation"
-        parent.categories = ["Segmentation"]
+        parent.categories = [""]
         parent.contributors = ["Florian Davaux (CREATIS)"]
         parent.helpText = "Automatic segmentation of pulmonary structures"
         parent.acknowledgementText = "KOLOR SPCCT project"
@@ -68,12 +63,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
     def __init__(self, parent=None):
         """
         Widget constructor
-
-        Args:
-            parent (QWidget): Parent widget.
-            
-        Returns:
-            None
         """
         ScriptedLoadableModuleWidget.__init__(self, parent)
 
@@ -100,113 +89,101 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def setup(self):
         """
-        Sets up the module's GUI.
-        Loads the UI file and connects the buttons to their functions.
-
-        Args:
-            None
-
-        Returns:
-            None
+        Called when the application opens the module the first time and the widget is initialized.
         """
         self.install_dependencies_if_needed()
-
         ScriptedLoadableModuleWidget.setup(self)
 
+        # Load the UI
         self.extensionPath = os.path.dirname(__file__)
         uiFilePath = os.path.join(self.extensionPath, 'Resources', 'UI', 'LungSegmentation.ui')
-        
-        # Correct UI loading
         uiWidget = slicer.util.loadUI(uiFilePath)
         self.layout.addWidget(uiWidget)
+        
+        # Map UI elements to self.ui
+        self.ui = slicer.util.childWidgetVariables(uiWidget)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-        ########################################## RABBIT ##########################################
-        # IN VIVO 
-        self.checkBoxRabbitInvivoParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoParenchyma")
-        self.checkBoxRabbitInvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoAirways")
-        self.checkBoxRabbitInvivoVascularTree = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoVascularTree")
-        self.checkBoxRabbitInvivoLobes = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoLobes")
-        self.checkBoxRabbitInvivoParenchymaAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoParenchymaAirways")
-        self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitInvivoParenchymaAirwaysVascularTree")
+        # UI Initialization
+        self.ui.progressBar.setVisible(False)
+        self.ui.progressBar.setValue(0)
 
-        # EX VIVO 
-        self.checkBoxRabbitExvivoAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitExvivoAirways")
-        self.checkBoxRabbitExvivoParenchymaAirways = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitExvivoParenchymaAirways")
+        # 4. Connections
+        self.ui.browseInputButton.clicked.connect(lambda: self.openDialog("input"))
+        self.ui.browseOutputButton.clicked.connect(lambda: self.openDialog("output"))
+        self.ui.pushButtonSegmentation.clicked.connect(self.onSegmentationButtonClicked)
 
-        # AXIAL 
-        self.checkBoxRabbitAxialAll = uiWidget.findChild(qt.QCheckBox, "checkBoxRabbitAxialAll")
-
-        ########################################## PIG ##########################################
-
-        # AXIAL
-        self.checkBoxPigAxialParenchyma = uiWidget.findChild(qt.QCheckBox, "checkBoxPigAxialParenchyma")
-
-        #########################################################################################
-
-        ######################################### RAT ###########################################
-
-        # IN VIVO
-        self.checkBoxRatInvivoParenchymaAirwaysKidneysHeart = uiWidget.findChild(qt.QCheckBox, "checkBoxRatInvivoParenchymaAirwaysKidneysHeart")
-
-        #########################################################################################
-
-        self.browseInputButton = uiWidget.findChild(qt.QPushButton, "browseInputButton")
-        self.lineEditInputPath = uiWidget.findChild(qt.QLineEdit, "inputLineEdit")
-
-        self.browseOutputButton = uiWidget.findChild(qt.QPushButton, "browseOutputButton")
-        self.lineEditOutputPath = uiWidget.findChild(qt.QLineEdit, "outputLineEdit")
-
-        self.segmentationButton = uiWidget.findChild(qt.QPushButton, "pushButtonSegmentation")
-
-        self.progressBar = uiWidget.findChild(qt.QProgressBar, "progressBar")
-        self.progressBar.setVisible(False)
-        self.progressBar.setValue(0)
-
-        self.browseInputButton.clicked.connect(lambda: self.openDialog("input"))
-        self.browseOutputButton.clicked.connect(lambda: self.openDialog("output"))
-        self.segmentationButton.clicked.connect(self.onSegmentationButtonClicked)
-
+        # Helper Collections
+        self.allCheckBoxes = uiWidget.findChildren(qt.QCheckBox)
 
     def install_dependencies_if_needed(self):
         """
-        Checks if nnUNet_package is installed.
-        If not, installs the correct version then closes Slicer to reload.
+        Checks if required packages are installed with correct versions.
+        If not, installs them using pip.
 
         Args:
-            None    
-
+            None
         Returns:
             None
         """
-        import importlib
 
-        required_versions = {
-            "nnUNet_package": "0.2.7"
+        # Define required packages and versions
+        requirements = {
+            "nnUNet_package": "0.2.8",
+            "blosc2": None,
+            "nnunetv2": None
         }
 
-        to_install = None
+        restart_required = False
 
-        try:
-            import nnUNet_package
-            if nnUNet_package.__version__ != required_versions["nnUNet_package"]:
-                print(f"nnUNet_package version {nnUNet_package.__version__} found, {required_versions['nnUNet_package']} required.")
-                to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
-            else:
-                print(f"nnUNet_package {nnUNet_package.__version__} OK")
-        except ImportError:
-            print("nnUNet_package not installed")
-            to_install = f"nnUNet_package=={required_versions['nnUNet_package']}"
+        # Helper Function 
+        def check_and_install(package_name, required_version, no_deps_flag):
+            to_install = None
+            
+            try:
+                installed_version = version(package_name)
+                
+                if required_version is None:
+                    # Case A: We don't care about the version number, just that it exists
+                    print(f"  - {package_name}: Found version {installed_version}")
+                
+                elif installed_version != required_version:
+                    # Case B: We need a specific version and it doesn't match
+                    print(f"  - {package_name}: Found {installed_version}, required {required_version}.")
+                    to_install = f"{package_name}=={required_version}"
+                    
+                else:
+                    print(f"  - {package_name}: {installed_version} OK")
+                    
+            except PackageNotFoundError:
+                print(f"  - {package_name}: Not installed.")
+                if required_version:
+                    to_install = f"{package_name}=={required_version}"
+                else:
+                    to_install = package_name
 
-        if to_install:
-            msg = f"Module {to_install} will be installed."
-            msg += "\nSlicer will close automatically after installation. Please relaunch it."
-            python_exec = sys.executable
-            subprocess.check_call([python_exec, "-m", "pip", "install", "--upgrade", "--no-cache-dir", to_install])
+            if to_install:                
+                cmd = [sys.executable, "-m", "pip", "install"]
+                if no_deps_flag:
+                    cmd.append("--no-deps")
+                cmd.append(to_install)
+                
+                subprocess.check_call(cmd)
+                return True
+            return False
+
+        for pkg, ver in requirements.items():
+            if check_and_install(pkg, ver, no_deps_flag=True):
+                restart_required = True
+
+        if restart_required:
+            msg = "Dependencies have been installed.\n"
+            msg += "Slicer will close automatically. Please relaunch it."
+            print(msg)
             slicer.util.mainWindow().close()
             sys.exit(0)
         else:
-            print("All dependencies are at the correct version.")
+            print("\nAll dependencies are correct.")
     
     
     def openDialog(self, which):
@@ -222,7 +199,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if which == "input":
             selectedPath = self.selectInputFile()
             if selectedPath:
-                self.lineEditInputPath.setText(selectedPath)
+                self.ui.inputLineEdit.setText(selectedPath)
+
         elif which == "output":
             selectedDir = qt.QFileDialog.getExistingDirectory(
                 slicer.util.mainWindow(),
@@ -230,7 +208,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 ""
             )
             if selectedDir:
-                self.lineEditOutputPath.setText(selectedDir)
+                self.ui.outputLineEdit.setText(selectedDir)
 
 
     def selectInputFile(self):
@@ -260,7 +238,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         else:
             return
         
-        self.lineEditInputPath.setText(path)
+        self.ui.inputLineEdit.setText(path)
 
 
     def safeLoadVolume(self, path):
@@ -376,7 +354,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             convertedPath = os.path.join(slicer.app.temporaryPath, "converted_from_image.nrrd")
             slicer.util.saveNode(volumeNode, convertedPath)
             self.convertedInputToDelete = convertedPath
-            # slicer.mrmlScene.RemoveNode(volumeNode)
             return convertedPath
 
         elif ext == ".nrrd":
@@ -385,6 +362,20 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         else:
             raise RuntimeError("Unsupported format. Please select a .nrrd, .mha, .nii file, or a DICOM folder.")
 
+    def _get_active_checkbox_name(self):
+        """
+        Helper: Returns the lowercased objectName of the currently checked box.
+        Returns None if no box is checked.
+
+        Args:
+            None
+        Returns:
+            str: The name of the active checkbox, lowercased.
+        """
+        for cb in self.allCheckBoxes:
+            if cb.isChecked():
+                return str(cb.objectName).lower()
+        return ""
 
     def check_mode(self):
         """
@@ -396,21 +387,16 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Returns:
             str: "invivo", "exvivo" or "axial"
         """
-        if (
-            self.checkBoxRabbitInvivoParenchyma.isChecked() or
-            self.checkBoxRabbitInvivoAirways.isChecked() or
-            self.checkBoxRabbitInvivoVascularTree.isChecked() or
-            self.checkBoxRabbitInvivoLobes.isChecked() or
-            self.checkBoxRabbitInvivoParenchymaAirways.isChecked() or
-            self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree.isChecked() or
-            self.checkBoxRatInvivoParenchymaAirwaysKidneysHeart.isChecked()
-        ):
+        name = self._get_active_checkbox_name()
+
+        if "invivo" in name:
             return "invivo"
-        elif self.checkBoxRabbitExvivoAirways.isChecked() or self.checkBoxRabbitExvivoParenchymaAirways.isChecked():
+        elif "exvivo" in name:
             return "exvivo"
-        else:
+        elif "axial" in name:
             return "axial"
-    
+
+        return None
 
     def check_animal(self):
         """
@@ -422,13 +408,17 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Returns:
             str: "pig", "rat" or "rabbit"
         """
-        if self.checkBoxPigAxialParenchyma.isChecked():
-            return "pig"
-        elif self.checkBoxRatInvivoParenchymaAirwaysKidneysHeart.isChecked():
-            return "rat"
-        else:
+        name = self._get_active_checkbox_name()
+        
+        if "rabbit" in name:
             return "rabbit"
-    
+        elif "pig" in name:
+            return "pig"
+        elif "rat" in name:
+            return "rat"
+        
+        return None
+                        
 
     def check_structure(self):
         """
@@ -440,22 +430,29 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Returns:
             str: "parenchyma", "airways", "vascular", "lobes", "parenchymaairways", "all"
         """
-        if self.checkBoxRabbitInvivoParenchyma.isChecked() or self.checkBoxPigAxialParenchyma.isChecked():
-            return "parenchyma"
-        elif self.checkBoxRabbitInvivoAirways.isChecked() or self.checkBoxRabbitExvivoAirways.isChecked():
-            return "airways"
-        elif self.checkBoxRabbitInvivoVascularTree.isChecked():
-            return "vascular"
-        elif self.checkBoxRabbitInvivoLobes.isChecked():
-            return "lobes"
-        elif self.checkBoxRabbitInvivoParenchymaAirways.isChecked() or self.checkBoxRabbitExvivoParenchymaAirways.isChecked():
-            return "parenchymaairways"
-        elif self.checkBoxRabbitInvivoParenchymaAirwaysVascularTree.isChecked() or self.checkBoxRabbitAxialAll.isChecked():
-            return "all"
-        elif self.checkBoxRatInvivoParenchymaAirwaysKidneysHeart.isChecked():
-            return "parenchymaairwayskidneysheart"
+        name = self._get_active_checkbox_name()
+        if not name:
+            return None
         
+        # We need to set double keys name -> result because some checkboxes have names that are substrings of others (e.g. "parenchyma" and "parenchymaairways")
+        checks = [
+            ("parenchymaairwayskidneysheart", "parenchymaairwayskidneysheart"),
+            ("parenchymaairwaysvascular", "all"),
+            ("all", "all"), # Handles "checkBoxRabbitAxialAll"
+            ("parenchymaairways", "parenchymaairways"),
+            ("parenchyma", "parenchyma"),
+            ("airways", "airways"),
+            ("vascular", "vascular"),
+            ("lobes", "lobes")
+        ]
 
+        for substring, result in checks:
+            if substring in name:
+                return result
+        
+        return None
+
+        
     def onSegmentationButtonClicked(self):
         """
         Function called when the segmentation button is clicked.
@@ -480,12 +477,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         print("\nStarting segmentation...")
 
         try:
-            self.input_path = self.prepareInputForSegmentation(self.lineEditInputPath.text)
+            self.input_path = self.prepareInputForSegmentation(self.ui.inputLineEdit.text)
         except Exception as e:
             qt.QMessageBox.critical(slicer.util.mainWindow(), "Input Error", str(e))
             return
 
-        output_path = self.lineEditOutputPath.text
+        output_path = self.ui.outputLineEdit.text
 
         if not os.path.isfile(self.input_path) or not self.input_path.endswith('.nrrd'):
             qt.QMessageBox.critical(slicer.util.mainWindow(), "File Error", "Please select a valid NRRD input file.")
@@ -494,8 +491,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         extension_dir = os.path.dirname(__file__)
         self.models_dir = os.path.join(extension_dir, "models")
 
-        self.progressBar.setVisible(True)
-        self.progressBar.setValue(0)
+        self.ui.progressBar.setVisible(True)
+        self.ui.progressBar.setValue(0)
         self.progressValue = 0
         self.elapsedSeconds = 0
 
@@ -537,7 +534,8 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             """
             try:
                 from pathlib import Path
-                runner_path = Path(__file__).parent/"scripts"/"nnunet_runner.py"
+                module_dir = os.path.dirname(__file__)
+                runner_path = os.path.join(module_dir, "Resources", "scripts", "nnunet_runner.py")
 
                 # Temporary file to store the path of the dataset json
                 self.tmp_file = os.path.join(tempfile.gettempdir(), "nnunet_context.json")
@@ -574,7 +572,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             None
         """
         self.timer.stop()
-        self.progressBar.setVisible(False)
+        self.ui.progressBar.setVisible(False)
         slicer.util.errorDisplay(f"Error during segmentation :\n{error_message}")
 
 
@@ -590,11 +588,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             None
         """
         self.timer.stop()
-        self.progressBar.setValue(100)
-        self.progressBar.setVisible(False)
+        self.ui.progressBar.setValue(100)
+        self.ui.progressBar.setVisible(False)
 
         if success:
-            self.load_prediction(self.lineEditOutputPath.text)
+            self.load_prediction(self.ui.outputLineEdit.text)
             slicer.util.infoDisplay("Segmentation finished successfully.")
         
     def updateProgressBar(self):
@@ -609,12 +607,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             None
         """
         if self.elapsedSeconds >= self.progressDuration:
-            self.progressBar.setValue(99)
+            self.ui.progressBar.setValue(99)
             return
         
         self.elapsedSeconds += 1
         progress = int((self.elapsedSeconds / self.progressDuration) * 99)
-        self.progressBar.setValue(progress)
+        self.ui.progressBar.setValue(progress)
 
 
     def load_prediction(self, output_path):
@@ -699,5 +697,3 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 print(f"Error deleting converted input: {e}")
             finally:
                 self.convertedInputToDelete = None
-        else:
-            print("No converted input to delete.")
