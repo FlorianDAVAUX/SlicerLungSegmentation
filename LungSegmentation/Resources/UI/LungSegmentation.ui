@@ -82,7 +82,7 @@
         <property name="title">
          <string>In vivo</string>
         </property>
-        <layout class="QFormLayout" name="formLayoutInvivo">
+        <layout class="QFormLayout" name="formLayoutInvivoRabbit">
          <item row="0" column="0">
           <widget class="QCheckBox" name="checkBoxRabbitInvivoParenchyma">
            <property name="text">
@@ -183,6 +183,31 @@
      </property>
      <layout class="QVBoxLayout" name="layoutPig">
 
+     <!-- IN VIVO -->
+     <item>
+       <widget class="QGroupBox" name="groupInvivo">
+        <property name="title">
+         <string>Invivo</string>
+        </property>
+        <layout class="QFormLayout" name="formLayoutInvivoPig">
+         <item row="0" column="0">
+          <widget class="QCheckBox" name="checkBoxPigInvivoParenchyma">
+           <property name="text">
+            <string>Parenchyma</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QCheckBox" name="checkBoxPigInvivoLobes">
+           <property name="text">
+            <string>Lobes</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+
       <!-- AXIAL -->
       <item>
        <widget class="QGroupBox" name="groupAxial">
@@ -200,6 +225,8 @@
         </layout>
        </widget>
       </item>
+
+
      </layout>
     </widget>
    </item>
@@ -218,7 +245,7 @@
         <property name="title">
          <string>Invivo</string>
         </property>
-        <layout class="QFormLayout" name="formLayoutInvivo">
+        <layout class="QFormLayout" name="formLayoutInvivoRat">
          <item row="0" column="0">
           <widget class="QCheckBox" name="checkBoxRatInvivoParenchymaAirwaysKidneysHeart">
            <property name="text">
