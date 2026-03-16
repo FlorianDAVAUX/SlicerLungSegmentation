@@ -129,7 +129,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         # Define required packages and versions
         requirements = {
-            "nnUNet_package": "0.2.8",
+            "nnUNet_package": "0.3.3",
             "blosc2": None,
             "nnunetv2": None
         }
