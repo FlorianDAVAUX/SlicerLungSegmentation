@@ -129,7 +129,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         # Define required packages and versions
         requirements = {
-            "nnUNet_package": "0.3.3",
+            "nnUNet_package": "0.3.6",
             "blosc2": None,
             "nnunetv2": None
         }
@@ -179,7 +179,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         if restart_required:
             msg = "Dependencies have been installed.\n"
             msg += "Slicer will close automatically. Please relaunch it."
-            print(msg)
             slicer.util.mainWindow().close()
             sys.exit(0)
         else:
@@ -436,6 +435,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         
         # We need to set double keys name -> result because some checkboxes have names that are substrings of others (e.g. "parenchyma" and "parenchymaairways")
         checks = [
+            ("parenchymaairwayskidneysheartliver", "parenchymaairwayskidneysheartliver"),
             ("parenchymaairwayskidneysheart", "parenchymaairwayskidneysheart"),
             ("parenchymaairwaysvascular", "all"),
             ("all", "all"), # Handles "checkBoxRabbitAxialAll"
@@ -541,7 +541,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 self.tmp_file = os.path.join(tempfile.gettempdir(), "nnunet_context.json")
                 if os.path.exists(self.tmp_file):
                     os.remove(self.tmp_file)
-                
+                                
                 cmd = [
                     sys.executable, str(runner_path),
                     "--mode", mode,
