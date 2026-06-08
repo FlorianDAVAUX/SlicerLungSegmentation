@@ -29,6 +29,11 @@ from qt import QTimer, QTreeView, QFileSystemModel, QPushButton, QFileDialog, QM
 class SegmentationSignals(QObject):
     """
     Signals for segmentation
+
+    Args:
+        None
+    Returns:
+        None
     """
     finished = Signal(bool)
     error = Signal(str)
@@ -43,6 +48,11 @@ class LungSegmentation(ScriptedLoadableModule):
     def __init__(self, parent):
         """
         Constructor module
+
+        Args:
+            parent (QWidget): Parent widget, default is None.
+        Returns:
+            None
         """
         parent.title = "LungSegmentation"
         parent.categories = [""]
@@ -63,11 +73,16 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
     def __init__(self, parent=None):
         """
         Widget constructor
+
+        Args:
+            parent (QWidget): Parent widget, default is None.
+        Returns:
+            None
         """
         ScriptedLoadableModuleWidget.__init__(self, parent)
 
         self.timer = qt.QTimer()
-        self.timer.setInterval(1000)
+        self.timer.setInterval(500)
         self.timer.timeout.connect(self.updateProgressBar)
 
         self.progressValue = 0
@@ -90,6 +105,11 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
     def setup(self):
         """
         Called when the application opens the module the first time and the widget is initialized.
+
+        Args:
+            None
+        Returns:
+            None
         """
         self.install_dependencies_if_needed()
         ScriptedLoadableModuleWidget.setup(self)
@@ -108,7 +128,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         self.ui.progressBar.setVisible(False)
         self.ui.progressBar.setValue(0)
 
-        # 4. Connections
+        # Connections
         self.ui.browseInputButton.clicked.connect(lambda: self.openDialog("input"))
         self.ui.browseOutputButton.clicked.connect(lambda: self.openDialog("output"))
         self.ui.pushButtonSegmentation.clicked.connect(self.onSegmentationButtonClicked)
@@ -118,72 +138,111 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
     def install_dependencies_if_needed(self):
         """
-        Checks if required packages are installed with correct versions.
-        If not, installs them using pip.
+        Checks if required packages are installed.
+        Installs missing ones in a single batch to save time. Handles OS/GPU checks.
 
         Args:
             None
         Returns:
             None
         """
-
-        # Define required packages and versions
-        requirements = {
-            "nnUNet_package": "0.3.6",
-            "blosc2": None,
-            "nnunetv2": None
+        # The only package that requires a strict version check
+        strict_requirements = {
+            "nnUNet_package": "0.3.4"
         }
 
-        restart_required = False
+        # Base requirements
+        base_requirements = [
+            "blosc2", "acvl_utils", "batchgenerators", "batchgeneratorsv2", "certifi",
+            "charset-normalizer", "connected-components-3d", "contourpy", "cycler",
+            "dicom2nifti", "dynamic_network_architectures", "einops", "fft-conv-pytorch",
+            "filelock", "fonttools", "fsspec", "future", "graphviz", "idna", "imagecodecs",
+            "ImageIO", "importlib_metadata", "importlib_resources", "Jinja2", "joblib",
+            "kiwisolver", "lazy-loader", "linecache2", "MarkupSafe", "matplotlib",
+            "mpmath", "networkx", "nibabel", "nnunetv2", "packaging", "pandas",
+            "pydicom", "pyparsing", "python-dateutil", "python-gdcm", "pytz", "PyYAML",
+            "scikit-image", "scikit-learn", "seaborn", "six", "sympy", "threadpoolctl",
+            "tifffile", "tqdm", "traceback2", "triton", "typing_extensions", "tzdata",
+            "unittest2", "urllib3", "yacs", "zipp"
+        ]
 
-        # Helper Function 
-        def check_and_install(package_name, required_version, no_deps_flag):
-            to_install = None
+        # CUDA/NVIDIA specific requirements 
+        cuda_requirements = [
+            "nvidia-cublas-cu12", "nvidia-cuda-cupti-cu12", "nvidia-cuda-nvrtc-cu12",
+            "nvidia-cuda-runtime-cu12", "nvidia-cudnn-cu12", "nvidia-cufft-cu12",
+            "nvidia-cufile-cu12", "nvidia-curand-cu12", "nvidia-cusolver-cu12",
+            "nvidia-cusparse-cu12", "nvidia-cusparselt-cu12", "nvidia-nccl-cu12",
+            "nvidia-nvjitlink-cu12", "nvidia-nvtx-cu12"
+        ]
+
+        # Helper Function to check for NVIDIA GPU
+        def has_nvidia_gpu():
+            """Returns True if an NVIDIA GPU is detected via nvidia-smi."""
+            if shutil.which("nvidia-smi") is None:
+                return False
+            try:
+                subprocess.check_call(
+                    ["nvidia-smi"], 
+                    stdout=subprocess.DEVNULL, 
+                    stderr=subprocess.DEVNULL
+                )
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                return False
+
+        # Add CUDA dependencies to the base list if hardware supports it
+        if has_nvidia_gpu():
+            base_requirements.extend(cuda_requirements)
+            print(f"NVIDIA GPU detected. Including CUDA dependencies.")
+        else:
+            print("No NVIDIA GPU detected or macOS running. Skipping CUDA dependencies.")
+
+        # List to hold everything we need to pass to pip
+        packages_to_install = []
+
+        # Check strict requirements
+        for pkg, required_ver in strict_requirements.items():
+            try:
+                installed_version = version(pkg)
+                if installed_version != required_ver:
+                    print(f"  - {pkg}: Found {installed_version}, requires {required_ver}.")
+                    packages_to_install.append(f"{pkg}=={required_ver}")
+                else:
+                    print(f"  - {pkg}: {installed_version} OK")
+            except PackageNotFoundError:
+                print(f"  - {pkg}: Not installed.")
+                packages_to_install.append(f"{pkg}=={required_ver}")
+
+        # Check base requirements
+        for pkg in base_requirements:
+            try:
+                version(pkg) # Just checking if it is installed at all
+            except PackageNotFoundError:
+                print(f"  - {pkg}: Not installed.")
+                packages_to_install.append(pkg)
+
+        # Install all missing packages in one single command
+        if packages_to_install:
+            print(f"\nInstalling missing packages: {packages_to_install}")
+            
+            cmd = [sys.executable, "-m", "pip", "install", "--no-deps"] + packages_to_install
             
             try:
-                installed_version = version(package_name)
-                
-                if required_version is None:
-                    # Case A: We don't care about the version number, just that it exists
-                    print(f"  - {package_name}: Found version {installed_version}")
-                
-                elif installed_version != required_version:
-                    # Case B: We need a specific version and it doesn't match
-                    print(f"  - {package_name}: Found {installed_version}, required {required_version}.")
-                    to_install = f"{package_name}=={required_version}"
-                    
-                else:
-                    print(f"  - {package_name}: {installed_version} OK")
-                    
-            except PackageNotFoundError:
-                print(f"  - {package_name}: Not installed.")
-                if required_version:
-                    to_install = f"{package_name}=={required_version}"
-                else:
-                    to_install = package_name
-
-            if to_install:                
-                cmd = [sys.executable, "-m", "pip", "install"]
-                if no_deps_flag:
-                    cmd.append("--no-deps")
-                cmd.append(to_install)
-                
                 subprocess.check_call(cmd)
-                return True
-            return False
-
-        for pkg, ver in requirements.items():
-            if check_and_install(pkg, ver, no_deps_flag=True):
-                restart_required = True
-
-        if restart_required:
-            msg = "Dependencies have been installed.\n"
-            msg += "Slicer will close automatically. Please relaunch it."
-            slicer.util.mainWindow().close()
-            sys.exit(0)
+                
+                # Restart notification
+                msg = "Dependencies have been installed.\nSlicer will close automatically. Please relaunch it."
+                print(msg)
+                slicer.util.messageBox(msg)
+                slicer.util.mainWindow().close()
+                sys.exit(0)
+                
+            except subprocess.CalledProcessError as e:
+                error_msg = f"Failed to install dependencies.\nCommand: {' '.join(cmd)}"
+                print(f"  [ERROR] {error_msg}")
+                slicer.util.errorDisplay("An error occurred while installing packages. Check the Python console.")
         else:
-            print("\nAll dependencies are correct.")
-    
+            print("\nAll dependencies are correctly installed.")
     
     def openDialog(self, which):
         """
@@ -209,7 +268,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             if selectedDir:
                 self.ui.outputLineEdit.setText(selectedDir)
 
-
     def selectInputFile(self):
         """
         Displays a dialog box to select an image file or a DICOM folder.
@@ -217,7 +275,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             None
-
         Returns:
             str: Path to the selected file or folder.
         """
@@ -247,7 +304,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             path (str): Path to the image file.
-        
         Returns:
             vtkMRMLScalarVolumeNode: Loaded volume node.
         """
@@ -261,7 +317,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             None
-
         Returns:
             str: Path to the selected image file.
         """
@@ -288,7 +343,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             None
-        
         Returns:
             str: Path to the selected DICOM folder.
         """
@@ -342,7 +396,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             convertedPath = os.path.join(slicer.app.temporaryPath, "converted_from_dicom.nrrd")
             slicer.util.saveNode(volumeNode, convertedPath)
             self.convertedInputToDelete = convertedPath
-            # slicer.mrmlScene.RemoveNode(volumeNode)
             return convertedPath
 
         elif ext in [".mha", ".nii", ".nii.gz"]:
@@ -382,7 +435,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             None
-
         Returns:
             str: "invivo", "exvivo" or "axial"
         """
@@ -403,7 +455,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             None
-
         Returns:
             str: "pig", "rat" or "rabbit"
         """
@@ -424,8 +475,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Checks the pulmonary structure to segment.
 
         Args:
-            None
-        
+            None 
         Returns:
             str: "parenchyma", "airways", "vascular", "lobes", "parenchymaairways", "all"
         """
@@ -435,12 +485,12 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         
         # We need to set double keys name -> result because some checkboxes have names that are substrings of others (e.g. "parenchyma" and "parenchymaairways")
         checks = [
-            ("parenchymaairwayskidneysheartliver", "parenchymaairwayskidneysheartliver"),
             ("parenchymaairwayskidneysheart", "parenchymaairwayskidneysheart"),
             ("parenchymaairwaysvascular", "all"),
-            ("all", "all"), # Handles "checkBoxRabbitAxialAll"
+            ("all", "all"), 
             ("parenchymaairways", "parenchymaairways"),
             ("parenchyma", "parenchyma"),
+            ("emptylobes", "emptylobes"),
             ("airways", "airways"),
             ("vascular", "vascular"),
             ("lobes", "lobes")
@@ -460,7 +510,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             None
-
         Returns:
             None
         """
@@ -514,7 +563,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             input_path (str): Path to the input file
             output_path (str): Path to the output folder
             animal (str): Name of the animal
-        
         Returns:
             None
         """
@@ -528,7 +576,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
             Args:
                 None
-
             Returns:
                 None
             """
@@ -541,7 +588,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 self.tmp_file = os.path.join(tempfile.gettempdir(), "nnunet_context.json")
                 if os.path.exists(self.tmp_file):
                     os.remove(self.tmp_file)
-                                
+                
                 cmd = [
                     sys.executable, str(runner_path),
                     "--mode", mode,
@@ -567,7 +614,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         
         Args:
             error_message (str): Error message to display.
-        
         Returns:
             None
         """
@@ -583,7 +629,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         
         Args:
             success (bool): Indicates whether the segmentation was successful or not.
-        
         Returns:
             None
         """
@@ -602,7 +647,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             None
-
         Returns:
             None
         """
@@ -621,7 +665,6 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
 
         Args:
             output_path (str): Path to the output folder where the prediction is saved.
-        
         Returns:
             None
         """
@@ -641,8 +684,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         Args:
             prediction_path (str): Path to the prediction file (.nrrd).
             output_path (str): Output folder to save the segmentation.
-            segmentation_name (str): Name to give to the segmentation.
-        
+            segmentation_name (str): Name to give to the segmentation. 
         Returns:
             str: Path to the saved segmentation file.
         """
@@ -685,6 +727,10 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
             name = label_map.get(label_index, f"Class_{label_index}")
             segment.SetName(name)
 
+        displayNode = segmentationNode.GetDisplayNode()
+        if displayNode:
+            displayNode.SetVisibility(False)
+
         segmentation_path = os.path.join(output_path, segmentation_name + ".nrrd")
         slicer.util.saveNode(segmentationNode, segmentation_path)
         os.remove(prediction_path)
@@ -697,3 +743,48 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 print(f"Error deleting converted input: {e}")
             finally:
                 self.convertedInputToDelete = None
+
+    def run_automated_task(self, volumeNode, animal, mode="invivo", structure="all"):
+        """
+        Main function to run the automated segmentation task with given parameters.
+        It prepares the input, configures paths, and starts the segmentation process.
+
+        Args:
+            volumeNode (vtkMRMLScalarVolumeNode): The input volume node to segment.
+            animal (str): The animal type ("pig", "rat", "rabbit").
+            mode (str): The segmentation mode ("invivo", "exvivo", "axial").
+            structure (str): The structure to segment ("parenchyma", "airways", "vascular", "lobes", "parenchymaairways", "all").
+        Returns:
+            None
+        """
+        print(f"Animal : {animal} | Mode : {mode} | Structure : {structure}")
+        
+        self.structure_to_segment = structure
+        self.input_node = volumeNode
+        
+        # Create a temporary directory to store the converted input and output results
+        temp_dir = tempfile.mkdtemp(prefix=f"AutoSeg_{animal}_")
+        self.input_path = os.path.join(temp_dir, "input_volume.nrrd")
+        slicer.util.saveNode(volumeNode, self.input_path)
+        self.convertedInputToDelete = self.input_path
+
+        # Directory to store results
+        output_path = os.path.join(temp_dir, "output")
+        os.makedirs(output_path, exist_ok=True)
+        
+        # UI updates
+        self.ui.outputLineEdit.setText(output_path)
+
+        # Finding the models directory
+        extension_dir = os.path.dirname(__file__)
+        self.models_dir = os.path.join(extension_dir, "models")
+
+        # Progress bar initialization
+        self.ui.progressBar.setVisible(True)
+        self.ui.progressBar.setValue(0)
+        self.progressValue = 0
+        self.elapsedSeconds = 0
+        qt.QTimer.singleShot(0, self.timer.start)
+
+        # Start the segmentation
+        self.start_segmentation(mode, output_path, animal)
