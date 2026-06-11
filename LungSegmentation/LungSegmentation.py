@@ -136,96 +136,76 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # Helper Collections
         self.allCheckBoxes = uiWidget.findChildren(qt.QCheckBox)
 
-    def install_dependencies_if_needed(self):
-        """
-        Checks if required packages are installed.
-        Installs missing ones in a single batch to save time. Handles OS/GPU checks.
-
-        Args:
-            None
-        Returns:
-            None
-        """
         # The only package that requires a strict version check
         strict_requirements = {
             "nnUNet_package": "0.3.4"
         }
 
-        # Base requirements
-        base_requirements = [
-            "blosc2", "acvl_utils", "batchgenerators", "batchgeneratorsv2", "certifi",
-            "charset-normalizer", "connected-components-3d", "contourpy", "cycler",
-            "dicom2nifti", "dynamic_network_architectures", "einops", "fft-conv-pytorch",
-            "filelock", "fonttools", "fsspec", "future", "graphviz", "idna", "imagecodecs",
-            "ImageIO", "importlib_metadata", "importlib_resources", "Jinja2", "joblib",
-            "kiwisolver", "lazy-loader", "linecache2", "MarkupSafe", "matplotlib",
-            "mpmath", "networkx", "nibabel", "nnunetv2", "packaging", "pandas",
-            "pydicom", "pyparsing", "python-dateutil", "python-gdcm", "pytz", "PyYAML",
-            "scikit-image", "scikit-learn", "seaborn", "six", "sympy", "threadpoolctl",
-            "tifffile", "tqdm", "traceback2", "triton", "typing_extensions", "tzdata",
-            "unittest2", "urllib3", "yacs", "zipp"
+    def install_dependencies_if_needed(self):
+        """
+        Checks if required packages are installed.
+        Relies on pip's native dependency resolution to avoid hardcoding sub-packages.
+        """
+
+        # ONLY list your direct, top-level requirements here.
+        # You can pin specific versions directly in the string.
+        requirements = [
+            "nnUNet_package": "0.3.4",
+            "nnunetv2",
+            "dicom2nifti"
         ]
 
-        # CUDA/NVIDIA specific requirements 
-        cuda_requirements = [
-            "nvidia-cublas-cu12", "nvidia-cuda-cupti-cu12", "nvidia-cuda-nvrtc-cu12",
-            "nvidia-cuda-runtime-cu12", "nvidia-cudnn-cu12", "nvidia-cufft-cu12",
-            "nvidia-cufile-cu12", "nvidia-curand-cu12", "nvidia-cusolver-cu12",
-            "nvidia-cusparse-cu12", "nvidia-cusparselt-cu12", "nvidia-nccl-cu12",
-            "nvidia-nvjitlink-cu12", "nvidia-nvtx-cu12"
-        ]
-
-        # Helper Function to check for NVIDIA GPU
         def has_nvidia_gpu():
-            """Returns True if an NVIDIA GPU is detected via nvidia-smi."""
-            if shutil.which("nvidia-smi") is None:
-                return False
-            try:
-                subprocess.check_call(
-                    ["nvidia-smi"], 
-                    stdout=subprocess.DEVNULL, 
-                    stderr=subprocess.DEVNULL
-                )
-                return True
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                return False
+            """Efficiently checks for an NVIDIA GPU driver without requiring admin rights."""
+            current_os = platform.system()
+            if current_os == "Windows":
+                import ctypes
+                try:
+                    ctypes.windll.LoadLibrary("nvcuda.dll")flo_desktop
+                    return True
+                except OSError:
+                    return False
+            elif current_os == "Linux":
+                return os.path.exists("/proc/driver/nvidia") or os.path.exists("/dev/nvidiactl")
+            return False
 
-        # Add CUDA dependencies to the base list if hardware supports it
+        # --- OS AND HARDWARE ROUTING ---
+        current_system = platform.system()
+
+        # 1. Handle Triton (Linux only)
+        if current_system == "Linux":
+            requirements.append("triton")
+            print("Linux OS detected. Appending Triton.")
+
+        # 2. Handle CUDA (Append the top-level CUDA runtime, pip handles the rest)
         if has_nvidia_gpu():
-            base_requirements.extend(cuda_requirements)
-            print(f"NVIDIA GPU detected. Including CUDA dependencies.")
-        else:
-            print("No NVIDIA GPU detected or macOS running. Skipping CUDA dependencies.")
+            # You only need the primary CUDA package; it will pull in cupti, cublas, etc.
+            requirements.append("nvidia-cuda-runtime-cu12")
+            print("NVIDIA CUDA driver detected. Appending CUDA dependencies.")
 
-        # List to hold everything we need to pass to pip
+        # --- INSTALLATION LOGIC ---
         packages_to_install = []
 
-        # Check strict requirements
-        for pkg, required_ver in strict_requirements.items():
-            try:
-                installed_version = version(pkg)
-                if installed_version != required_ver:
-                    print(f"  - {pkg}: Found {installed_version}, requires {required_ver}.")
-                    packages_to_install.append(f"{pkg}=={required_ver}")
-                else:
-                    print(f"  - {pkg}: {installed_version} OK")
-            except PackageNotFoundError:
-                print(f"  - {pkg}: Not installed.")
-                packages_to_install.append(f"{pkg}=={required_ver}")
-
-        # Check base requirements
-        for pkg in base_requirements:
-            try:
-                version(pkg) # Just checking if it is installed at all
-            except PackageNotFoundError:
-                print(f"  - {pkg}: Not installed.")
-                packages_to_install.append(pkg)
-
-        # Install all missing packages in one single command
-        if packages_to_install:
-            print(f"\nInstalling missing packages: {packages_to_install}")
+        for req in requirements:
+            # Extract the package name without the version pin (e.g., 'nnunetv2' from 'nnunetv2==0.3.4')
+            pkg_name = req.split("==")[0].split(">=")[0]
             
-            cmd = [sys.executable, "-m", "pip", "install", "--no-deps"] + packages_to_install
+            try:
+                installed_version = version(pkg_name)
+                # If you have a strict pin (==), check if it matches
+                if "==" in req:
+                    required_ver = req.split("==")[1]
+                    if installed_version != required_ver:
+                        packages_to_install.append(req)
+            except PackageNotFoundError:
+                packages_to_install.append(req)
+
+        # Install missing packages
+        if packages_to_install:
+            print(f"\nInstalling packages (dependencies will be resolved automatically): {packages_to_install}")
+            
+            # NOTICE: "--no-deps" has been removed so pip resolves dependencies automatically
+            cmd = [sys.executable, "-m", "pip", "install"] + packages_to_install
             
             try:
                 subprocess.check_call(cmd)
@@ -242,7 +222,7 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
                 print(f"  [ERROR] {error_msg}")
                 slicer.util.errorDisplay("An error occurred while installing packages. Check the Python console.")
         else:
-            print("\nAll dependencies are correctly installed.")
+            print("\nAll top-level dependencies are correctly installed.")
     
     def openDialog(self, which):
         """
