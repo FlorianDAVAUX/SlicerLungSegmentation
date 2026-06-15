@@ -18,9 +18,11 @@ import slicer
 import tempfile
 import threading
 import importlib.util
+from typing import Optional
 from slicer.ScriptedLoadableModule import *
 import importlib.resources as resources
 from importlib.metadata import version, PackageNotFoundError
+from packaging.requirements import Requirement
 from qt import QTimer, QTreeView, QFileSystemModel, QPushButton, QFileDialog, QMessageBox, Signal, QObject
 
 
@@ -136,94 +138,71 @@ class LungSegmentationWidget(ScriptedLoadableModuleWidget):
         # Helper Collections
         self.allCheckBoxes = uiWidget.findChildren(qt.QCheckBox)
 
-        # The only package that requires a strict version check
-        strict_requirements = {
-            "nnUNet_package": "0.3.4"
-        }
-
     def install_dependencies_if_needed(self):
         """
-        Checks if required packages are installed.
-        Relies on pip's native dependency resolution to avoid hardcoding sub-packages.
+        Checks if the required dependencies are installed and up to date.
+        If not, it installs or updates them using pip and prompts the user to restart Slicer if necessary.
+
+        The function first checks the current versions of the required packages, then attempts to install or update them.
+        After installation, it checks if any versions have changed. If so, it prompts the user to restart Slicer to apply the changes.
+        
+        If everything is up to date, it simply continues without requiring a restart.
+
+        Args:
+            None
+        
+        Returns:
+            None
         """
 
-        # ONLY list your direct, top-level requirements here.
-        # You can pin specific versions directly in the string.
-        requirements = [
-            "nnUNet_package": "0.3.4",
-            "nnunetv2",
+        packages_to_install = [
+            "python-gdcm==3.0.21", 
+            "nnUNet_package", 
             "dicom2nifti"
         ]
 
-        def has_nvidia_gpu():
-            """Efficiently checks for an NVIDIA GPU driver without requiring admin rights."""
-            current_os = platform.system()
-            if current_os == "Windows":
-                import ctypes
-                try:
-                    ctypes.windll.LoadLibrary("nvcuda.dll")flo_desktop
-                    return True
-                except OSError:
-                    return False
-            elif current_os == "Linux":
-                return os.path.exists("/proc/driver/nvidia") or os.path.exists("/dev/nvidiactl")
-            return False
-
-        # --- OS AND HARDWARE ROUTING ---
-        current_system = platform.system()
-
-        # 1. Handle Triton (Linux only)
-        if current_system == "Linux":
-            requirements.append("triton")
-            print("Linux OS detected. Appending Triton.")
-
-        # 2. Handle CUDA (Append the top-level CUDA runtime, pip handles the rest)
-        if has_nvidia_gpu():
-            # You only need the primary CUDA package; it will pull in cupti, cublas, etc.
-            requirements.append("nvidia-cuda-runtime-cu12")
-            print("NVIDIA CUDA driver detected. Appending CUDA dependencies.")
-
-        # --- INSTALLATION LOGIC ---
-        packages_to_install = []
-
-        for req in requirements:
-            # Extract the package name without the version pin (e.g., 'nnunetv2' from 'nnunetv2==0.3.4')
-            pkg_name = req.split("==")[0].split(">=")[0]
-            
+        # Check current versions before installation to determine if a restart will be needed afterward
+        versions_before = {}
+        for pkg in packages_to_install:
+            clean_name = pkg.split("==")[0]
             try:
-                installed_version = version(pkg_name)
-                # If you have a strict pin (==), check if it matches
-                if "==" in req:
-                    required_ver = req.split("==")[1]
-                    if installed_version != required_ver:
-                        packages_to_install.append(req)
+                versions_before[clean_name] = version(clean_name)
             except PackageNotFoundError:
-                packages_to_install.append(req)
+                versions_before[clean_name] = None
 
-        # Install missing packages
-        if packages_to_install:
-            print(f"\nInstalling packages (dependencies will be resolved automatically): {packages_to_install}")
+        print(f"Checking for updates for : {packages_to_install}...")
+
+        try:
+            # Tool for silent installation with pip in Slicer
+            slicer.util.pip_install(["-q", "--upgrade", "setuptools", "wheel", "scikit-build"])
+            slicer.util.pip_install(["-q", "--upgrade"] + packages_to_install)
             
-            # NOTICE: "--no-deps" has been removed so pip resolves dependencies automatically
-            cmd = [sys.executable, "-m", "pip", "install"] + packages_to_install
+            importlib.invalidate_caches()
+
+            # Verify the actual changes
+            needs_restart = False
+            for pkg in packages_to_install:
+                clean_name = pkg.split("==")[0]
+                try:
+                    version_after = version(clean_name)
+                    if versions_before.get(clean_name) != version_after:
+                        needs_restart = True
+                        print(f"-> {clean_name} updated : {versions_before.get(clean_name)} -> {version_after}")
+                except PackageNotFoundError:
+                    needs_restart = True 
             
-            try:
-                subprocess.check_call(cmd)
-                
-                # Restart notification
-                msg = "Dependencies have been installed.\nSlicer will close automatically. Please relaunch it."
+            if needs_restart:
+                msg = "All dependencies have been installed or updated. \n Please restart 3D Slicer to apply the changes."
                 print(msg)
                 slicer.util.messageBox(msg)
                 slicer.util.mainWindow().close()
                 sys.exit(0)
-                
-            except subprocess.CalledProcessError as e:
-                error_msg = f"Failed to install dependencies.\nCommand: {' '.join(cmd)}"
-                print(f"  [ERROR] {error_msg}")
-                slicer.util.errorDisplay("An error occurred while installing packages. Check the Python console.")
-        else:
-            print("\nAll top-level dependencies are correctly installed.")
-    
+            else:
+                print("Everything is up to date. No restart needed.")
+            
+        except Exception as e:
+            slicer.util.errorDisplay(f"Erreur lors de l'installation : {str(e)}")
+        
     def openDialog(self, which):
         """
         Opens a dialog box to select a file or folder.
